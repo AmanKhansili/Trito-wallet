@@ -1,5 +1,6 @@
 import 'react-native-get-random-values';
 import { ethers } from 'ethers';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { storageService } from './storageService';
 import { validateMnemonic, validatePrivateKey } from '../utils/validation';
 import { logger } from '../utils/logger';
@@ -50,6 +51,9 @@ export const walletService = {
     mnemonicPhrase: string,
     pin: string,
   ): Promise<void> {
+    if (await storageService.getSecurePrivateKey()) {
+      throw new Error('A wallet already exists. Remove it first.');
+    }
     await storageService.saveSecureWallet(privateKey, mnemonicPhrase);
     await storageService.savePin(pin);
     await storageService.setWalletExists(true, address);
@@ -64,20 +68,23 @@ export const walletService = {
   /**
    * Imports an existing wallet using either a 12-word mnemonic phrase or a 32-byte hex private key.
    */
-  async importWallet(
-    secretInput: string,
-    pin: string,
-  ): Promise<ImportedWalletData> {
+  async importWallet(secretInput: string, pin: string): Promise<ImportedWalletData> {
+    if (await storageService.getSecurePrivateKey()) {
+      throw new Error('A wallet already exists. Remove it first.');
+    }
+
     const trimmed = secretInput.trim();
+    // Collapse any whitespace/newlines into single spaces and lowercase (seed phrases only)
+    const normalized = trimmed.toLowerCase().split(/\s+/).join(' ');
 
     // Check if it's a seed phrase
-    if (trimmed.includes(' ')) {
-      const val = validateMnemonic(trimmed);
+    if (normalized.includes(' ')) {
+      const val = validateMnemonic(normalized);
       if (!val.isValid) {
         throw new Error(val.error || 'Invalid mnemonic phrase.');
       }
 
-      const mnemonic = ethers.Mnemonic.fromPhrase(trimmed);
+      const mnemonic = ethers.Mnemonic.fromPhrase(normalized);
       const hdNode = ethers.HDNodeWallet.fromMnemonic(mnemonic, "m/44'/60'/0'/0/0");
 
       await storageService.saveSecureWallet(hdNode.privateKey, mnemonic.phrase);
@@ -122,6 +129,7 @@ export const walletService = {
 
   /**
    * Authenticate and unlock wallet with PIN.
+   * May throw if the PIN is temporarily locked after too many wrong attempts.
    */
   async unlockWithPin(pin: string): Promise<boolean> {
     const isValid = await storageService.verifyPin(pin);
@@ -144,11 +152,27 @@ export const walletService = {
   },
 
   /**
-   * Unlock with biometrics (after successful LocalAuthentication).
+   * Unlock with biometrics. The biometric prompt is shown here, inside the service,
+   * so no caller can unlock the wallet without a successful biometric check.
    */
   async unlockWithBiometrics(): Promise<boolean> {
-    const isBiometricsOn = await storageService.isBiometricsEnabled();
-    if (!isBiometricsOn) {
+    if (!(await storageService.isBiometricsEnabled())) {
+      return false;
+    }
+
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+    if (!hasHardware || !isEnrolled) {
+      return false;
+    }
+
+    const auth = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Unlock TRITO Wallet',
+      fallbackLabel: 'Enter PIN',
+      cancelLabel: 'Cancel',
+      disableDeviceFallback: true,
+    });
+    if (!auth.success) {
       return false;
     }
 

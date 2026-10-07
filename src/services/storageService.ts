@@ -8,7 +8,7 @@ const SECURE_MNEMONIC = 'trito_secure_mnemonic';
 const SECURE_PRIVATE_KEY = 'trito_secure_private_key';
 const SECURE_USER_PIN = 'trito_secure_pin';
 const SECURE_BIOMETRICS = 'trito_secure_biometrics';
-
+const SECURE_PIN_ATTEMPTS = 'trito_secure_pin_attempts';
 // AsyncStorage Keys (Public / Non-Sensitive Metadata)
 const STORAGE_WALLET_EXISTS = 'trito_wallet_exists';
 const STORAGE_PUBLIC_ADDRESS = 'trito_public_address';
@@ -76,15 +76,27 @@ export const storageService = {
     }
   },
 
-  async verifyPin(inputPin: string): Promise<boolean> {
-    try {
-      const stored = await SecureStore.getItemAsync(SECURE_USER_PIN);
-      if (!stored) return false;
-      return stored === inputPin;
-    } catch (err) {
-      logger.error('Failed to verify PIN:', err);
-      return false;
+  async verifyPin(input: string): Promise<boolean> {
+    const raw = await SecureStore.getItemAsync(SECURE_PIN_ATTEMPTS);
+    const state = raw ? JSON.parse(raw) : { count: 0, lockedUntil: 0 };
+    if (Date.now() < state.lockedUntil) {
+      throw new Error('Too many wrong attempts. Try again later.');
     }
+
+    const stored = await SecureStore.getItemAsync(SECURE_USER_PIN);
+    const ok = !!stored && stored === input; // baad me hashed compare
+
+    const next = ok
+      ? { count: 0, lockedUntil: 0 }
+      : {
+          count: state.count + 1,
+          lockedUntil:
+            state.count + 1 >= 5
+              ? Date.now() + Math.min(30_000 * 2 ** (state.count - 4), 3_600_000)
+              : 0,
+        };
+    await SecureStore.setItemAsync(SECURE_PIN_ATTEMPTS, JSON.stringify(next));
+    return ok;
   },
 
   async hasPin(): Promise<boolean> {

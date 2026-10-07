@@ -33,7 +33,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
       case 'USDC':
         return 'circle-multiple-outline';
       case 'USDT':
-        return 'currency-usd-circle';
+        return 'currency-usd';
       case 'DAI':
         return 'alpha-d-box-outline';
       case 'LINK':

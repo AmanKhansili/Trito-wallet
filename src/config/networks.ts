@@ -13,12 +13,16 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
       symbol: 'ETH',
       decimals: 18,
     },
+    isTestnet: true,
   },
   mainnet: {
     id: 'mainnet',
     name: 'Ethereum Mainnet',
     chainId: 1,
-    rpcUrl: process.env.EXPO_PUBLIC_MAINNET_RPC_URL || 'https://ethereum-rpc.publicnode.com', // <-- Yahan 'https://eth.llamarpc.com' hata kar yeh likhein
+    isTestnet: false,
+    rpcUrl:
+      process.env.EXPO_PUBLIC_MAINNET_RPC_URL ||
+      'https://eth.llamarpc.com',
     explorerUrl: 'https://etherscan.io',
     nativeCurrency: {
       name: 'Ether',
@@ -26,6 +30,7 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
       decimals: 18,
     },
   },
+ 
 };
 
 export const DEFAULT_NETWORK_ID: NetworkId = 'sepolia';

@@ -86,7 +86,7 @@ export const transactionService = {
 
       return {
         gasLimit: fallbackLimit,
-        gasPrice: fallbackPrice,
+        gasPrice: fallbackGasPrice,
         totalCostWei,
         totalCostEth,
         totalCostUsd,
