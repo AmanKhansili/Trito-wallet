@@ -21,22 +21,12 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../../src/constants/theme';
 import { getExplorerTxUrl } from '../../src/config/networks';
 import { TokenConfig, SwapQuote, SwapStepId } from '../../src/types';
-import {
-  formatTokenBalance,
-  parseTokenAmount,
-  formatFiat,
-} from '../../src/utils/formatters';
+import { formatTokenBalance, parseTokenAmount, formatFiat } from '../../src/utils/formatters';
 import { swapService } from '../../src/services/swapService';
 
 export default function SwapScreen() {
-  const {
-    network,
-    tokenBalances,
-    ethBalance,
-    marketPrices,
-    currencyPreference,
-    refreshBalances,
-  } = useWallet();
+  const { network, tokenBalances, ethBalance, marketPrices, currencyPreference, refreshBalances } =
+    useWallet();
   const { colors } = useTheme();
 
   // Selected Tokens
@@ -48,7 +38,10 @@ export default function SwapScreen() {
     [tokenBalances, fromSymbol],
   );
   const toTokenBalance = useMemo(
-    () => tokenBalances.find((b) => b.token.symbol === toSymbol) || tokenBalances[1] || tokenBalances[0],
+    () =>
+      tokenBalances.find((b) => b.token.symbol === toSymbol) ||
+      tokenBalances[1] ||
+      tokenBalances[0],
     [tokenBalances, toSymbol],
   );
 
@@ -168,15 +161,11 @@ export default function SwapScreen() {
     setQuoteError('');
 
     try {
-      const confirmedTx = await swapService.executeSwap(
-        quote,
-        network.id,
-        (step, msg, hash) => {
-          setCurrentStep(step);
-          setStepMessage(msg);
-          if (hash) setStepTxHash(hash);
-        },
-      );
+      const confirmedTx = await swapService.executeSwap(quote, network.id, (step, msg, hash) => {
+        setCurrentStep(step);
+        setStepMessage(msg);
+        if (hash) setStepTxHash(hash);
+      });
 
       setExecutionSuccessHash(confirmedTx.hash);
       setShowConfirmModal(false);
@@ -199,7 +188,7 @@ export default function SwapScreen() {
 
   return (
     <ScreenWrapper>
-      <Header title="Uniswap V3 Swap" showBack rightElement={<NetworkBadge />} />
+      <Header title="Uniswap" showBack rightElement={<NetworkBadge />} />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Slippage Selector */}
@@ -441,7 +430,9 @@ export default function SwapScreen() {
             </View>
 
             <View style={styles.specRow}>
-              <Text style={[styles.specLabel, { color: colors.textSecondary }]}>Liquidity Source</Text>
+              <Text style={[styles.specLabel, { color: colors.textSecondary }]}>
+                Liquidity Source
+              </Text>
               <Text style={[styles.specValue, { color: colors.textPrimary }]}>
                 {quote.liquiditySource}
               </Text>
@@ -569,8 +560,12 @@ export default function SwapScreen() {
               </View>
 
               <View style={styles.confirmRow}>
-                <Text style={[styles.confirmLabel, { color: colors.textSecondary }]}>Slippage:</Text>
-                <Text style={[styles.confirmValue, { color: colors.textPrimary }]}>{slippage}%</Text>
+                <Text style={[styles.confirmLabel, { color: colors.textSecondary }]}>
+                  Slippage:
+                </Text>
+                <Text style={[styles.confirmValue, { color: colors.textPrimary }]}>
+                  {slippage}%
+                </Text>
               </View>
             </>
           )}
