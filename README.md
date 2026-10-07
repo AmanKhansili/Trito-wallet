@@ -1,15 +1,15 @@
 # TRITO — Production-Ready Mobile Cryptocurrency Wallet
 
-TRITO is a non-custodial Ethereum cryptocurrency wallet built with **React Native**, **Expo**, **TypeScript**, and **ethers.js v6**.
+ TRITO is a non-custodial Ethereum cryptocurrency wallet built with **React Native**, **Expo**, **TypeScript**, and **ethers.js v6**.
 
-TRITO gives users sovereign custody of their crypto assets with hardware-grade security, local cryptographic transaction signing, live blockchain state synchronization, and native **Uniswap V3** on-chain swapping.
+ TRITO gives users sovereign custody of their crypto assets with hardware-grade security, local cryptographic transaction signing, live blockchain state synchronization, and native **Uniswap V3** on-chain swapping.
 
 ---
 
-## 🌟 Key Architecture & Capabilities
+ ## 🌟 Key Architecture & Capabilities
 
-- **Zero Mock / 100% Real Blockchain**
-- All account balances, gas estimates, and transactions interact with the Ethereum blockchain via JSON-RPC providers.
+ - **Zero Mock / 100% Real Blockchain**
+  - All account balances, gas estimates, and transactions interact with the Ethereum blockchain via JSON-RPC providers.
 - **True Non-Custodial Security**
   - Private keys and 12-word BIP-39 recovery phrases are generated locally using cryptographic entropy.
   - Sensitive data is stored strictly in device hardware-backed **SecureStore** (iOS Keychain / Android Keystore).
@@ -53,7 +53,7 @@ TRITO gives users sovereign custody of their crypto assets with hardware-grade s
 
 ---
 
-## 📁 Project Structure
+ ## 📁 Project Structure
 
 ```
 trito-wallet/
@@ -143,9 +143,9 @@ trito-wallet/
 
 ---
 
-## ⚙️ Environment Variables
+ ## ⚙️ Environment Variables
 
-Create a `.env` file in the root directory:
+ Create a `.env` file in the root directory:
 
 ```
 # Ethereum Sepolia Testnet RPC URL
@@ -158,31 +158,31 @@ EXPO_PUBLIC_MAINNET_RPC_URL=https://eth.llamarpc.com
 EXPO_PUBLIC_COINGECKO_API_KEY=
 ```
 
-> **Security:** Never commit your `.env` file or expose private API keys, wallet private keys, or recovery phrases in source control.
+ > **Security:** Never commit your `.env` file or expose private API keys, wallet private keys, or recovery phrases in source control.
 
 ---
 
-## 🚀 Running the Application
+ ## 🚀 Running the Application
 
-### 1\. Install Dependencies
+ ### 1\. Install Dependencies
 
 ```
 npm install
 ```
 
-### 2\. Start the Expo Development Server
+ ### 2\. Start the Expo Development Server
 
 ```
 npx expo start
 ```
 
-### 3\. Run on iOS Simulator
+ ### 3\. Run on iOS Simulator
 
 ```
 npx expo start --ios
 ```
 
-### 4\. Run on Android Emulator
+ ### 4\. Run on Android Emulator
 
 ```
 npx expo start --android
@@ -190,19 +190,19 @@ npx expo start --android
 
 ---
 
-## 🧪 Automated Testing
+ ## 🧪 Automated Testing
 
-Run the automated test suite to verify decimal precision, address validation, error translation, and slippage mathematics:
+ Run the automated test suite to verify decimal precision, address validation, error translation, and slippage mathematics:
 
 ```
 npm test
 ```
 
-### Test Coverage
+ ### Test Coverage
 
-The test suite includes **15 unit tests** covering:
+ The test suite includes **15 unit tests** covering:
 
-- Native ETH 18-decimal parsing and formatting
+ - Native ETH 18-decimal parsing and formatting
 - USDC 6-decimal integer scaling
 - Ethereum address format validation
 - Mnemonic word-count verification
@@ -214,3 +214,4 @@ The test suite includes **15 unit tests** covering:
 - Uniswap slippage error translation
 - Abnormal quote protection
 - Price impact rejection above **30%**
+
