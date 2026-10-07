@@ -6,8 +6,7 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
     name: 'Ethereum Sepolia',
     chainId: 11155111,
     rpcUrl:
-      process.env.EXPO_PUBLIC_SEPOLIA_RPC_URL ||
-      'https://ethereum-sepolia-rpc.publicnode.com',
+      process.env.EXPO_PUBLIC_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
     explorerUrl: 'https://sepolia.etherscan.io',
     nativeCurrency: {
       name: 'Sepolia Ether',
