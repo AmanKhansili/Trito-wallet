@@ -179,6 +179,5 @@ All 15 unit tests validate:
 - Slippage calculation (`amountOutMinimum`)
 - Uniswap STF and slippage error translation
 - Abnormal quote protection (> 30% price impact rejection)
-#   T r i t o - w a l l e t  
- #   T r i t o - w a l l e t  
+ 
  
