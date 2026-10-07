@@ -4,6 +4,7 @@ plan.md
 progress.md
 # dependencies
 node_modules/
+*.env
 
 # Expo
 .expo/

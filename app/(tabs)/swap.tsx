@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
+import { formatUnits } from 'ethers';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenWrapper } from '../../src/components/ScreenWrapper';
 import { Header } from '../../src/components/Header';
@@ -21,22 +22,13 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../../src/constants/theme';
 import { getExplorerTxUrl } from '../../src/config/networks';
 import { TokenConfig, SwapQuote, SwapStepId } from '../../src/types';
-import {
-  formatTokenBalance,
-  parseTokenAmount,
-  formatFiat,
-} from '../../src/utils/formatters';
+import { formatTokenBalance, parseTokenAmount, formatFiat } from '../../src/utils/formatters';
 import { swapService } from '../../src/services/swapService';
+import { zeroExService } from '@/services/zeroExService';
 
 export default function SwapScreen() {
-  const {
-    network,
-    tokenBalances,
-    ethBalance,
-    marketPrices,
-    currencyPreference,
-    refreshBalances,
-  } = useWallet();
+  const { network, tokenBalances, ethBalance, marketPrices, currencyPreference, refreshBalances } =
+    useWallet();
   const { colors } = useTheme();
 
   // Selected Tokens
@@ -48,12 +40,18 @@ export default function SwapScreen() {
     [tokenBalances, fromSymbol],
   );
   const toTokenBalance = useMemo(
-    () => tokenBalances.find((b) => b.token.symbol === toSymbol) || tokenBalances[1] || tokenBalances[0],
+    () =>
+      tokenBalances.find((b) => b.token.symbol === toSymbol) ||
+      tokenBalances[1] ||
+      tokenBalances[0],
     [tokenBalances, toSymbol],
   );
 
   const fromToken: TokenConfig = fromTokenBalance?.token;
   const toToken: TokenConfig = toTokenBalance?.token;
+
+  const [provider, setProvider] = useState<'uniswap' | '0x'>('uniswap');
+  const activeService = provider === '0x' ? zeroExService : swapService;
 
   // Slippage Setting (0.1%, 0.5%, 1.0%)
   const [slippage, setSlippage] = useState<number>(0.5);
@@ -96,7 +94,7 @@ export default function SwapScreen() {
     setIsQuoting(true);
     setQuoteError('');
     try {
-      const q = await swapService.getSwapQuote(
+      const q = await activeService.getSwapQuote(
         fromToken,
         toToken,
         amountInRaw,
@@ -162,14 +160,39 @@ export default function SwapScreen() {
   const handleConfirmSwap = async () => {
     if (!quote) return;
     setIsExecuting(true);
-    setCurrentStep('checking_balance');
-    setStepMessage('Starting swap execution...');
+    setCurrentStep('quoting');
+    setStepMessage('Checking latest price...');
     setStepTxHash(undefined);
     setQuoteError('');
+    setExecutionSuccessHash(null);
 
     try {
-      const confirmedTx = await swapService.executeSwap(
-        quote,
+      // Re-quote right before sending
+      const fresh = await activeService.getSwapQuote(
+        fromToken,
+        toToken,
+        quote.amountInRaw,
+        slippage,
+        network.id,
+      );
+
+      // Price moved below what the user agreed to: stop and show the updated quote
+      if (fresh.amountOutRaw < quote.amountOutMinimumRaw) {
+        setShowConfirmModal(false);
+        setQuote(fresh);
+        setQuoteError('Price moved while you were reviewing. Please review the updated quote.');
+        return;
+      }
+
+      // Keep the minimum the user saw as the hard floor
+      const finalQuote: SwapQuote = {
+        ...fresh,
+        amountOutMinimumRaw: quote.amountOutMinimumRaw,
+        amountOutMinimumFormatted: quote.amountOutMinimumFormatted,
+      };
+
+      const confirmedTx = await activeService.executeSwap(
+        finalQuote,
         network.id,
         (step, msg, hash) => {
           setCurrentStep(step);
@@ -191,11 +214,23 @@ export default function SwapScreen() {
   };
 
   // Fiat calculations
-  const fromPriceUsd = marketPrices[fromToken?.coingeckoId || '']?.usd || 0;
-  const toPriceUsd = marketPrices[toToken?.coingeckoId || '']?.usd || 0;
+  // Fiat calculations (values already in the selected currency)
+  const fiatKey: 'usd' | 'inr' = currencyPreference === 'INR' ? 'inr' : 'usd';
+  const fiatPrice = (id?: string) => marketPrices[id || '']?.[fiatKey] ?? 0;
+
+  // Testnet tokens have no real value, so don't show fake fiat amounts there
+  const showFiat = !network.isTestnet;
   const payFloat = parseFloat(payAmountStr) || 0;
-  const payUsd = payFloat * fromPriceUsd;
-  const receiveUsd = quote ? parseFloat(quote.amountOutFormatted) * toPriceUsd : 0;
+  const payFiat = payFloat * fiatPrice(fromToken?.coingeckoId);
+  const receiveFloat = quote ? Number(formatUnits(quote.amountOutRaw, toToken.decimals)) : 0;
+  const receiveFiat = receiveFloat * fiatPrice(toToken?.coingeckoId);
+  const gasFiat = quote ? Number(quote.estimatedGasCostEth) * fiatPrice('ethereum') : 0;
+
+  const formatEthFee = (v: string) => {
+    const n = Number(v);
+    if (!n) return '0';
+    return n < 0.00001 ? '<0.00001' : n.toFixed(5);
+  };
 
   return (
     <ScreenWrapper>
@@ -204,6 +239,39 @@ export default function SwapScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Slippage Selector */}
+        {__DEV__ ? (
+          <View style={styles.slippageHeader}>
+            <Text style={[styles.slippageLabel, { color: colors.textSecondary }]}>Provider</Text>
+            <View style={styles.slippagePills}>
+              {(['uniswap', '0x'] as const).map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => {
+                    setProvider(p);
+                    setQuote(null);
+                    setQuoteError('');
+                  }}
+                  style={[
+                    styles.slippageBtn,
+                    {
+                      backgroundColor: provider === p ? colors.primary : colors.surfaceLight,
+                      borderColor: provider === p ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.slippageText,
+                      { color: provider === p ? colors.textInverse : colors.textPrimary },
+                    ]}
+                  >
+                    {p === '0x' ? '0x' : 'Uniswap'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
         <View style={styles.slippageHeader}>
           <Text style={[styles.slippageLabel, { color: colors.textSecondary }]}>
             Slippage Tolerance
@@ -268,7 +336,7 @@ export default function SwapScreen() {
 
           <View style={styles.boxFooter}>
             <Text style={[styles.usdHint, { color: colors.textSecondary }]}>
-              ≈ {formatFiat(payUsd, currencyPreference)}
+              ≈ {showFiat ? formatFiat(payFiat, currencyPreference) : '—'}
             </Text>
 
             {/* Token Selector Pills */}
@@ -359,7 +427,7 @@ export default function SwapScreen() {
 
           <View style={styles.boxFooter}>
             <Text style={[styles.usdHint, { color: colors.textSecondary }]}>
-              ≈ {formatFiat(receiveUsd, currencyPreference)}
+              ≈ {showFiat ? formatFiat(receiveFiat, currencyPreference) : '—'}
             </Text>
 
             {/* Token Selector Pills for Receive */}
@@ -442,7 +510,9 @@ export default function SwapScreen() {
             </View>
 
             <View style={styles.specRow}>
-              <Text style={[styles.specLabel, { color: colors.textSecondary }]}>Liquidity Source</Text>
+              <Text style={[styles.specLabel, { color: colors.textSecondary }]}>
+                Liquidity Source
+              </Text>
               <Text style={[styles.specValue, { color: colors.textPrimary }]}>
                 {quote.liquiditySource}
               </Text>
@@ -570,8 +640,12 @@ export default function SwapScreen() {
               </View>
 
               <View style={styles.confirmRow}>
-                <Text style={[styles.confirmLabel, { color: colors.textSecondary }]}>Slippage:</Text>
-                <Text style={[styles.confirmValue, { color: colors.textPrimary }]}>{slippage}%</Text>
+                <Text style={[styles.confirmLabel, { color: colors.textSecondary }]}>
+                  Slippage:
+                </Text>
+                <Text style={[styles.confirmValue, { color: colors.textPrimary }]}>
+                  {slippage}%
+                </Text>
               </View>
             </>
           )}

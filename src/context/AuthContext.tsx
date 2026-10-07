@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { storageService } from '../services/storageService';
@@ -122,6 +129,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const importWallet = useCallback(
     async (secret: string, pin: string): Promise<ImportedWalletData> => {
+      if (await storageService.getSecurePrivateKey()) {
+        throw new Error('A wallet already exists. Remove it first.');
+      }
       const imported = await walletService.importWallet(secret, pin);
       setHasWallet(true);
       setUnlocked(true);
@@ -145,19 +155,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     try {
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Unlock TRITO Wallet',
-        fallbackLabel: 'Enter PIN',
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false,
-      });
-
-      if (result.success) {
-        const unlockedViaService = await walletService.unlockWithBiometrics();
-        if (unlockedViaService) {
-          setUnlocked(true);
-          return true;
-        }
+      const unlocked = await walletService.unlockWithBiometrics();
+      if (unlocked) {
+        setUnlocked(true);
+        return true;
       }
       return false;
     } catch (err) {
@@ -183,15 +184,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsBiometricsEnabled(enabled);
   }, []);
 
-  const changePin = useCallback(
-    async (oldPin: string, newPin: string): Promise<boolean> => {
-      const verified = await storageService.verifyPin(oldPin);
-      if (!verified) return false;
-      await storageService.savePin(newPin);
-      return true;
-    },
-    [],
-  );
+  const changePin = useCallback(async (oldPin: string, newPin: string): Promise<boolean> => {
+    const verified = await storageService.verifyPin(oldPin);
+    if (!verified) return false;
+    await storageService.savePin(newPin);
+    return true;
+  }, []);
 
   const setAutoLockMinutes = useCallback(async (minutes: number): Promise<void> => {
     await storageService.saveAutoLockMinutes(minutes);

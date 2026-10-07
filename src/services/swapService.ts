@@ -7,7 +7,13 @@ import {
   TransactionRecord,
   SwapStepId,
 } from '../types';
-import { UNISWAP_CONTRACTS, UNISWAP_POOL_FEES, ERC20_ABI, QUOTER_V2_ABI, SWAP_ROUTER_02_ABI } from '../config/uniswap';
+import {
+  UNISWAP_CONTRACTS,
+  UNISWAP_POOL_FEES,
+  ERC20_ABI,
+  QUOTER_V2_ABI,
+  SWAP_ROUTER_02_ABI,
+} from '../config/uniswap';
 import { getProvider } from './cryptoService';
 import { walletService } from './walletService';
 import { priceService } from './priceService';
@@ -50,8 +56,7 @@ export const swapService = {
     // Resolve wrapped ETH addresses if swapping native ETH
     const tokenInAddress =
       fromToken.type === 'NATIVE' ? contracts.weth : fromToken.contractAddress!;
-    const tokenOutAddress =
-      toToken.type === 'NATIVE' ? contracts.weth : toToken.contractAddress!;
+    const tokenOutAddress = toToken.type === 'NATIVE' ? contracts.weth : toToken.contractAddress!;
 
     const quoter = new ethers.Contract(contracts.quoterV2, QUOTER_V2_ABI, provider);
 
@@ -146,6 +151,8 @@ export const swapService = {
       estimatedGasCostUsd,
       route: [fromToken.symbol, toToken.symbol],
       liquiditySource: `Uniswap V3 (${bestQuote.fee / 10000}%)`,
+      provider: 'uniswap',
+      quotedAt: Date.now(),
     };
   },
 
@@ -238,7 +245,11 @@ export const swapService = {
           throw new Error('Insufficient ETH balance for swap.');
         }
       } else {
-        const tokenContract = new ethers.Contract(quote.fromToken.contractAddress!, ERC20_ABI, provider);
+        const tokenContract = new ethers.Contract(
+          quote.fromToken.contractAddress!,
+          ERC20_ABI,
+          provider,
+        );
         const tokenBal = await tokenContract.balanceOf(userAddress);
         if (BigInt(tokenBal.toString()) < quote.amountInRaw) {
           throw new Error(`Insufficient ${quote.fromToken.symbol} balance for swap.`);

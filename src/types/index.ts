@@ -1,4 +1,5 @@
 export type NetworkId = 'sepolia' | 'mainnet';
+export type SwapProviderId = 'uniswap' | '0x';
 
 export interface NetworkConfig {
   id: NetworkId;
@@ -11,6 +12,7 @@ export interface NetworkConfig {
     symbol: string;
     decimals: number;
   };
+  isTestnet: boolean;
 }
 
 export type TokenType = 'NATIVE' | 'ERC20';
@@ -95,6 +97,18 @@ export interface SwapQuote {
   estimatedGasCostUsd: number;
   route: string[];
   liquiditySource: string;
+   provider: SwapProviderId;
+  quotedAt: number;                  // Date.now() jab quote bana
+  marketDeviationPercent?: number;   // market se farak (+ better, − worse)
+  warnings?: string[];
+  // sirf 0x: ready-made transaction
+  zeroEx?: {
+    to: string;
+    data: string;
+    value: string;
+    gas?: string;
+    allowanceTarget?: string;
+  };
 }
 
 export type SwapStepId =
