@@ -25,7 +25,7 @@ export const TOKENS: TokenConfig[] = [
     symbol: 'USDT',
     name: 'Tether USD',
     decimals: 6,
-    contractAddress: '0xaA8E23Fb10790717174664391C80dE60F792945C',
+    contractAddress: '0xAA8E23fb10790717174664391C80DE60f792945c',
     network: 'sepolia',
     type: 'ERC20',
     icon: 'tether',
