@@ -38,6 +38,9 @@ export const cryptoService = {
   /**
    * Fetches ERC20 balance using contract.balanceOf(address).
    */
+  /**
+   * Fetches ERC20 balance using contract.balanceOf(address).
+   */
   async getTokenBalance(
     address: string,
     token: TokenConfig,
@@ -49,12 +52,16 @@ export const cryptoService = {
 
     const provider = getProvider(networkId);
     try {
-      const contract = new ethers.Contract(token.contractAddress, ERC20_ABI, provider);
-      const balance = await contract.balanceOf(address);
+      // Dono addresses ko lowercase karke safe EIP-55 checksum mein convert karte hain
+      const safeContractAddress = ethers.getAddress(token.contractAddress.toLowerCase());
+      const safeUserAddress = ethers.getAddress(address.toLowerCase());
+
+      const contract = new ethers.Contract(safeContractAddress, ERC20_ABI, provider);
+      const balance = await contract.balanceOf(safeUserAddress);
       return BigInt(balance.toString());
     } catch (err) {
       logger.error(`Failed to fetch ERC20 balance for ${token.symbol} on ${networkId}:`, err);
-      // Return 0n on contract call failure rather than crashing whole balance list, but log error
+      // Contract call fail hone par crash na ho, 0 balance return karein
       return 0n;
     }
   },
