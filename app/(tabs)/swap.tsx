@@ -199,7 +199,8 @@ export default function SwapScreen() {
 
   return (
     <ScreenWrapper>
-      <Header title="Uniswap V3 Swap" showBack rightElement={<NetworkBadge />} />
+      {/*Uniswap V3 Swap */}
+      <Header title="Swap" showBack rightElement={<NetworkBadge />} />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Slippage Selector */}
