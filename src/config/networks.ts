@@ -6,8 +6,7 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
     name: 'Ethereum Sepolia',
     chainId: 11155111,
     rpcUrl:
-      process.env.EXPO_PUBLIC_SEPOLIA_RPC_URL ||
-      'https://ethereum-sepolia-rpc.publicnode.com',
+      process.env.EXPO_PUBLIC_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
     explorerUrl: 'https://sepolia.etherscan.io',
     nativeCurrency: {
       name: 'Sepolia Ether',
@@ -19,9 +18,7 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
     id: 'mainnet',
     name: 'Ethereum Mainnet',
     chainId: 1,
-    rpcUrl:
-      process.env.EXPO_PUBLIC_MAINNET_RPC_URL ||
-      'https://eth.llamarpc.com',
+    rpcUrl: process.env.EXPO_PUBLIC_MAINNET_RPC_URL || 'https://ethereum-rpc.publicnode.com', // <-- Yahan 'https://eth.llamarpc.com' hata kar yeh likhein
     explorerUrl: 'https://etherscan.io',
     nativeCurrency: {
       name: 'Ether',
