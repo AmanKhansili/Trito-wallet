@@ -7,17 +7,24 @@ import { formatTokenBalance } from '../utils/formatters';
 import { logger } from '../utils/logger';
 
 // Cached provider instances to avoid unnecessary socket recreations
-const providerCache: Partial<Record<NetworkId, ethers.JsonRpcProvider>> = {};
+// src/services/cryptoService.ts (Top par getProvider function)
+const providerCache: Partial<Record<NetworkId, { url: string; provider: ethers.JsonRpcProvider }>> =
+  {};
 
 export function getProvider(networkId: NetworkId): ethers.JsonRpcProvider {
-  if (!providerCache[networkId]) {
-    const config = getNetwork(networkId);
-    providerCache[networkId] = new ethers.JsonRpcProvider(config.rpcUrl, {
-      chainId: config.chainId,
-      name: config.name,
-    });
+  const config = getNetwork(networkId);
+  const cached = providerCache[networkId];
+
+  if (!cached || cached.url !== config.rpcUrl) {
+    providerCache[networkId] = {
+      url: config.rpcUrl,
+      provider: new ethers.JsonRpcProvider(config.rpcUrl, {
+        chainId: config.chainId,
+        name: config.name,
+      }),
+    };
   }
-  return providerCache[networkId]!;
+  return providerCache[networkId]!.provider;
 }
 
 export const cryptoService = {

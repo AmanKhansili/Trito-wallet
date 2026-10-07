@@ -20,9 +20,7 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
     name: 'Ethereum Mainnet',
     chainId: 1,
     isTestnet: false,
-    rpcUrl:
-      process.env.EXPO_PUBLIC_MAINNET_RPC_URL ||
-      'https://eth.llamarpc.com',
+    rpcUrl: 'https://ethereum-rpc.publicnode.com',
     explorerUrl: 'https://etherscan.io',
     nativeCurrency: {
       name: 'Ether',
@@ -30,7 +28,6 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
       decimals: 18,
     },
   },
- 
 };
 
 export const DEFAULT_NETWORK_ID: NetworkId = 'sepolia';
