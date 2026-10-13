@@ -17,7 +17,7 @@ export interface SendResult {
 
 export const transactionService = {
   /**
-   * Estimates network gas dynamically with EIP-1559 buffers from cryptoService.
+   * Estimates network gas dynamically from blockchain RPC for native or ERC20 transfers.
    */
   async estimateGas(
     fromAddress: string,
@@ -77,7 +77,7 @@ export const transactionService = {
         totalCostUsd,
       };
     } catch (err) {
-      logger.error('Gas estimation failed:', err);
+      logger.warn('Gas estimation dry-run failed, using safe fallback:', err);
       // Fallback safe estimate
       const fallbackGasPrice = ethers.parseUnits('25', 'gwei');
       const fallbackLimit = token.type === 'NATIVE' ? 21000n : 65000n;
@@ -125,8 +125,8 @@ export const transactionService = {
           txParams.gasPrice = gasEstimate.gasPrice;
         }
       } else {
-        // Fallback to dynamic fee data directly if no estimate provided
         const feeData = await cryptoService.getDynamicFeeData(networkId);
+        txParams.gasLimit = 21000n;
         txParams.maxFeePerGas = feeData.maxFeePerGas;
         txParams.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
       }
@@ -209,6 +209,7 @@ export const transactionService = {
         }
       } else {
         const feeData = await cryptoService.getDynamicFeeData(networkId);
+        overrides.gasLimit = 65000n;
         overrides.maxFeePerGas = feeData.maxFeePerGas;
         overrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
       }

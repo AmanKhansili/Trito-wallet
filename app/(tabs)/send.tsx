@@ -20,11 +20,12 @@ import { Input } from '../../src/components/Input';
 import { NetworkBadge } from '../../src/components/NetworkBadge';
 import { ConfirmModal } from '../../src/components/ConfirmModal';
 import { Toast } from '../../src/components/Toast';
+import { AddressBookModal } from '../../src/components/AddressBookModal';
 import { useWallet } from '../../src/context/WalletContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../../src/constants/theme';
 import { getExplorerTxUrl } from '../../src/config/networks';
-import { TokenConfig, GasEstimate } from '../../src/types';
+import { TokenConfig, GasEstimate, GasSpeedTier } from '../../src/types';
 import {
   formatTokenBalance,
   parseTokenAmount,
@@ -33,12 +34,21 @@ import {
 } from '../../src/utils/formatters';
 import { validateAddress, validateSendAmount } from '../../src/utils/validation';
 import { transactionService } from '../../src/services/transactionService';
+import { cryptoService } from '../../src/services/cryptoService';
 
 export default function SendScreen() {
   const router = useRouter();
   const searchParams = useLocalSearchParams<{ asset?: string }>();
-  const { address, network, tokenBalances, ethBalance, marketPrices, currencyPreference, addTransaction } =
-    useWallet();
+  const {
+    address,
+    network,
+    tokenBalances,
+    ethBalance,
+    marketPrices,
+    currencyPreference,
+    gasSpeed,
+    setGasSpeed,
+  } = useWallet();
   const { colors } = useTheme();
 
   // Selected Token
@@ -56,6 +66,7 @@ export default function SendScreen() {
   const [isEstimatingGas, setIsEstimatingGas] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [showAddressBook, setShowAddressBook] = useState<boolean>(false);
 
   // Confirmation & Broadcast States
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
@@ -71,7 +82,7 @@ export default function SendScreen() {
     }
   };
 
-  // Estimate Gas dynamically whenever recipient, token, or amount updates
+  // Estimate Gas dynamically whenever recipient, token, amount, or gas speed tier updates
   const updateGasEstimate = useCallback(async () => {
     if (!address || !selectedToken) return;
 
@@ -82,22 +93,38 @@ export default function SendScreen() {
     try {
       const targetAddress = validateAddress(trimmedRecipient).isValid
         ? trimmedRecipient
-        : address; // Use self as fallback recipient for gas dry run
+        : address;
 
-      const estimate = await transactionService.estimateGas(
+      const baseEstimate = await transactionService.estimateGas(
         address,
         targetAddress,
         selectedToken,
         parsedAmount,
         network.id,
       );
-      setGasEstimate(estimate);
+
+      // Apply gas speed multiplier (Standard, Fast, Instant)
+      const tieredFees = await cryptoService.getTieredGasFees(network.id, gasSpeed);
+      const adjustedCostWei = baseEstimate.gasLimit * tieredFees.maxFeePerGas;
+      const adjustedEth = Number(adjustedCostWei) / 1e18;
+      const ethPrice = marketPrices['ethereum']?.usd ?? 3000;
+
+      setGasEstimate({
+        ...baseEstimate,
+        gasPrice: tieredFees.gasPrice,
+        maxFeePerGas: tieredFees.maxFeePerGas,
+        maxPriorityFeePerGas: tieredFees.maxPriorityFeePerGas,
+        totalCostWei: adjustedCostWei,
+        totalCostEth: adjustedEth.toFixed(6),
+        totalCostUsd: adjustedEth * ethPrice,
+        tier: gasSpeed,
+      });
     } catch {
       // Ignored
     } finally {
       setIsEstimatingGas(false);
     }
-  }, [address, recipient, amountStr, selectedToken, network.id]);
+  }, [address, recipient, amountStr, selectedToken, network.id, gasSpeed, marketPrices]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -221,7 +248,7 @@ export default function SendScreen() {
               const isSelected = tb.token.symbol === selectedSymbol;
               return (
                 <TouchableOpacity
-                  key={tb.token.symbol}
+                  key={tb.token.contractAddress ? `${tb.token.symbol}-${tb.token.contractAddress}` : tb.token.symbol}
                   onPress={() => {
                     setSelectedSymbol(tb.token.symbol);
                     setAmountStr('');
@@ -256,7 +283,7 @@ export default function SendScreen() {
             })}
           </ScrollView>
 
-          {/* Recipient Address Input */}
+          {/* Recipient Address Input with Address Book Picker & Paste */}
           <Input
             label="Recipient Address"
             placeholder="0x..."
@@ -268,9 +295,18 @@ export default function SendScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             rightElement={
-              <TouchableOpacity onPress={handlePasteRecipient} style={styles.pasteBtn}>
-                <Text style={[styles.pasteText, { color: colors.primaryLight }]}>PASTE</Text>
-              </TouchableOpacity>
+              <View style={styles.inputRightActions}>
+                <TouchableOpacity
+                  onPress={() => setShowAddressBook(true)}
+                  style={styles.contactPickBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                >
+                  <Ionicons name="people-outline" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handlePasteRecipient} style={styles.pasteBtn}>
+                  <Text style={[styles.pasteText, { color: colors.primaryLight }]}>PASTE</Text>
+                </TouchableOpacity>
+              </View>
             }
           />
 
@@ -294,6 +330,43 @@ export default function SendScreen() {
             }
           />
 
+          {/* Gas Speed Tier Controls */}
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+            Transaction Speed (Gas Fee)
+          </Text>
+          <View style={styles.speedRow}>
+            {(['standard', 'fast', 'instant'] as GasSpeedTier[]).map((tier) => {
+              const isSelected = gasSpeed === tier;
+              const labels = {
+                standard: 'Standard (Normal)',
+                fast: 'Fast (1.25x)',
+                instant: 'Instant (1.5x)',
+              };
+              return (
+                <TouchableOpacity
+                  key={tier}
+                  onPress={() => setGasSpeed(tier)}
+                  style={[
+                    styles.speedChip,
+                    {
+                      backgroundColor: isSelected ? colors.primary : colors.surface,
+                      borderColor: isSelected ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.speedText,
+                      { color: isSelected ? '#FFFFFF' : colors.textPrimary },
+                    ]}
+                  >
+                    {labels[tier]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           {/* Gas & Fee Overview Card */}
           <View
             style={[
@@ -311,7 +384,7 @@ export default function SendScreen() {
 
             <View style={styles.feeRow}>
               <Text style={[styles.feeLabel, { color: colors.textSecondary }]}>
-                Estimated Network Fee
+                Estimated Network Fee ({gasSpeed.toUpperCase()})
               </Text>
               {isEstimatingGas ? (
                 <ActivityIndicator size="small" color={colors.primary} />
@@ -410,6 +483,13 @@ export default function SendScreen() {
           </View>
 
           <View style={styles.modalRow}>
+            <Text style={[styles.modalLabel, { color: colors.textSecondary }]}>Gas Speed:</Text>
+            <Text style={[styles.modalValue, { color: colors.textPrimary }]}>
+              {gasSpeed.toUpperCase()}
+            </Text>
+          </View>
+
+          <View style={styles.modalRow}>
             <Text style={[styles.modalLabel, { color: colors.textSecondary }]}>Gas Fee:</Text>
             <Text style={[styles.modalValue, { color: colors.textPrimary }]}>
               {gasEstimate ? `${Number(gasEstimate.totalCostEth).toFixed(5)} ETH` : 'Calculating'}
@@ -421,6 +501,17 @@ export default function SendScreen() {
           </Text>
         </View>
       </ConfirmModal>
+
+      {/* Address Book Modal */}
+      <AddressBookModal
+        visible={showAddressBook}
+        onClose={() => setShowAddressBook(false)}
+        isPickerMode
+        onSelectAddress={(addr) => {
+          setRecipient(addr);
+          setErrorMsg('');
+        }}
+      />
 
       <Toast message={toastMsg} onDismiss={() => setToastMsg(null)} />
     </ScreenWrapper>
@@ -460,6 +551,14 @@ const styles = StyleSheet.create({
     ...TYPOGRAPHY.caption,
     marginTop: 2,
   },
+  inputRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  contactPickBtn: {
+    padding: 6,
+  },
   pasteBtn: {
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
@@ -473,6 +572,22 @@ const styles = StyleSheet.create({
   },
   maxText: {
     ...TYPOGRAPHY.captionBold,
+  },
+  speedRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+    marginBottom: SPACING.md,
+  },
+  speedChip: {
+    flex: 1,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  speedText: {
+    ...TYPOGRAPHY.captionBold,
+    fontSize: 11,
   },
   feeCard: {
     borderRadius: RADIUS.lg,

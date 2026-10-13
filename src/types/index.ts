@@ -26,6 +26,7 @@ export interface TokenConfig {
   type: TokenType;
   icon: string;
   coingeckoId: string;
+  isCustom?: boolean;
 }
 
 export interface TokenBalance {
@@ -43,6 +44,21 @@ export interface MarketPrice {
 }
 
 export type MarketPricesMap = Record<string, MarketPrice>;
+
+export interface MarketItem {
+  id: string;
+  symbol: string;
+  name: string;
+  image?: string;
+  currentPriceUsd: number;
+  currentPriceInr: number;
+  priceChangePercentage24h: number;
+  marketCapUsd: number;
+  totalVolumeUsd: number;
+  high24hUsd: number;
+  low24hUsd: number;
+  marketCapRank: number;
+}
 
 export type CurrencyPreference = 'USD' | 'INR';
 
@@ -69,6 +85,8 @@ export interface TransactionRecord {
   };
 }
 
+export type GasSpeedTier = 'standard' | 'fast' | 'instant';
+
 export interface GasEstimate {
   gasLimit: bigint;
   gasPrice: bigint;
@@ -77,6 +95,7 @@ export interface GasEstimate {
   totalCostWei: bigint;
   totalCostEth: string;
   totalCostUsd: number;
+  tier?: GasSpeedTier;
 }
 
 export interface SwapQuote {
@@ -98,10 +117,9 @@ export interface SwapQuote {
   route: string[];
   liquiditySource: string;
   provider: SwapProviderId;
-  quotedAt: number; // Date.now() jab quote bana
-  marketDeviationPercent?: number; // market se farak (+ better, − worse)
+  quotedAt: number;
+  marketDeviationPercent?: number;
   warnings?: string[];
-  // sirf 0x: ready-made transaction
   zeroEx?: {
     to: string;
     data: string;
@@ -154,44 +172,30 @@ export interface WalletState {
   lastUpdated: number | null;
 }
 
-export type TransakOrderType = 'BUY' | 'SELL';
+// ==================== ADVANCED EXTENSION TYPES ====================
 
-export interface TransakQuote {
-  conversionPrice: number;
-  fiatCurrency: CurrencyPreference;
-  cryptoCurrency: string;
-  paymentMethod: string;
-  fiatAmount: number;
-  cryptoAmount: number;
-  transakFee: number;
-  networkFee: number;
-  totalFee: number;
-  minAmount: number;
-  maxAmount: number;
+export interface AddressBookContact {
+  id: string;
+  name: string;
+  address: string;
+  networkId?: NetworkId;
+  addedAt: number;
 }
 
-export type TransakOrderStatus =
-  | 'AWAITING_PAYMENT_FROM_USER'
-  | 'PAYMENT_DONE_MARKED_BY_USER'
-  | 'PROCESSING'
-  | 'PENDING_DELIVERY_FROM_TRANSAK'
-  | 'ON_HOLD_PENDING_DELIVERY_DUE_TO_LOW_SPREAD'
-  | 'COMPLETED'
-  | 'CANCELLED'
-  | 'FAILED'
-  | 'REFUNDED'
-  | 'EXPIRED';
+export interface WalletAccount {
+  index: number;
+  name: string;
+  address: string;
+}
 
-export interface TransakOrderRecord {
-  orderId: string;
-  orderType: TransakOrderType;
-  status: TransakOrderStatus;
+export type FiatRampProvider = 'onramp.money' | 'transak';
+export type FiatRampType = 'buy' | 'sell';
+
+export interface FiatRampParams {
+  provider: FiatRampProvider;
+  type: FiatRampType;
   cryptoCurrency: string;
-  cryptoAmount: string;
-  fiatCurrency: CurrencyPreference;
-  fiatAmount: number;
+  fiatCurrency: 'INR' | 'USD';
   walletAddress: string;
   networkId: NetworkId;
-  timestamp: number;
-  txHash?: string;
 }

@@ -14,6 +14,9 @@ import { ScreenWrapper } from '../../src/components/ScreenWrapper';
 import { AssetCard } from '../../src/components/AssetCard';
 import { NetworkBadge } from '../../src/components/NetworkBadge';
 import { Toast } from '../../src/components/Toast';
+import { BuySellModal } from '../../src/components/BuySellModal';
+import { ImportTokenModal } from '../../src/components/ImportTokenModal';
+import { AccountSelectorModal } from '../../src/components/AccountSelectorModal';
 import { useWallet } from '../../src/context/WalletContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../../src/constants/theme';
@@ -33,10 +36,14 @@ export default function DashboardScreen() {
     isRefreshing,
     refreshBalances,
     networkError,
+    activeAccountIndex,
   } = useWallet();
   const { colors } = useTheme();
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showBuySellModal, setShowBuySellModal] = useState<boolean>(false);
+  const [showImportTokenModal, setShowImportTokenModal] = useState<boolean>(false);
+  const [showAccountModal, setShowAccountModal] = useState<boolean>(false);
 
   const portfolioValue =
     currencyPreference === 'INR' ? totalPortfolioValueInr : totalPortfolioValueUsd;
@@ -54,18 +61,21 @@ export default function DashboardScreen() {
 
   return (
     <ScreenWrapper>
-      {/* Top Header Bar */}
+      {/* Top Header Bar with Account Selector & Network */}
       <View style={styles.topBar}>
         <TouchableOpacity
-          onPress={handleCopyAddress}
-          style={[styles.addressBadge, { backgroundColor: colors.surfaceLight }]}
+          onPress={() => setShowAccountModal(true)}
+          style={[styles.accountBadge, { backgroundColor: colors.surfaceLight }]}
           activeOpacity={0.7}
         >
-          <Ionicons name="wallet-outline" size={16} color={colors.primary} style={styles.addrIcon} />
-          <Text style={[styles.addressText, { color: colors.textPrimary }]}>
-            {shortenAddress(address || '')}
+          <View style={[styles.accountDot, { backgroundColor: colors.primary }]} />
+          <Text style={[styles.accountText, { color: colors.textPrimary }]}>
+            Account {activeAccountIndex + 1}
           </Text>
-          <Ionicons name="copy-outline" size={14} color={colors.textSecondary} />
+          <Text style={[styles.addressMuted, { color: colors.textSecondary }]}>
+            ({shortenAddress(address || '', 4, 3)})
+          </Text>
+          <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
         </TouchableOpacity>
 
         <NetworkBadge onPress={() => router.push('/(tabs)/settings')} />
@@ -105,9 +115,13 @@ export default function DashboardScreen() {
           ]}
         >
           <View style={styles.portfolioHeader}>
-            <Text style={[styles.portfolioLabel, { color: colors.textSecondary }]}>
-              Total Portfolio Value
-            </Text>
+            <TouchableOpacity onPress={handleCopyAddress} style={styles.copyAddressRow}>
+              <Text style={[styles.portfolioLabel, { color: colors.textSecondary }]}>
+                Total Portfolio
+              </Text>
+              <Ionicons name="copy-outline" size={12} color={colors.textTertiary} style={styles.copyMiniIcon} />
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={toggleCurrency} style={styles.currencyToggle}>
               <Text style={[styles.currencyText, { color: colors.primaryLight }]}>
                 {currencyPreference} ▾
@@ -119,7 +133,7 @@ export default function DashboardScreen() {
             {formatFiat(portfolioValue, currencyPreference)}
           </Text>
 
-          {/* Quick Action Buttons */}
+          {/* Quick Action Buttons (Send, Receive, Swap, Buy/Sell) */}
           <View style={styles.actionRow}>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/send')}
@@ -154,35 +168,48 @@ export default function DashboardScreen() {
               <Text style={[styles.actionLabel, { color: colors.textPrimary }]}>Swap</Text>
             </TouchableOpacity>
 
+            {/* Buy / Sell with Onramp.money UPI & Transak */}
             <TouchableOpacity
-              onPress={() => setToastMessage('Fiat on-ramp coming in Mainnet release')}
+              onPress={() => setShowBuySellModal(true)}
               style={styles.actionItem}
               activeOpacity={0.7}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.surfaceLight }]}>
-                <Ionicons name="card-outline" size={22} color={colors.textTertiary} />
+                <Ionicons name="card-outline" size={22} color={colors.primary} />
               </View>
-              <Text style={[styles.actionLabel, { color: colors.textTertiary }]}>Buy</Text>
+              <Text style={[styles.actionLabel, { color: colors.textPrimary }]}>Buy / Sell</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Assets Section */}
+        {/* Assets Section Header with Import Custom Token Button */}
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Assets</Text>
-          <TouchableOpacity
-            onPress={() => refreshBalances(false)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="refresh" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
+          <View style={styles.sectionActions}>
+            <TouchableOpacity
+              onPress={() => setShowImportTokenModal(true)}
+              style={[styles.importPill, { backgroundColor: colors.surfaceLight }]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add" size={14} color={colors.primary} />
+              <Text style={[styles.importText, { color: colors.primary }]}>Import Token</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => refreshBalances(false)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.refreshIconBtn}
+            >
+              <Ionicons name="refresh" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {tokenBalances.map((tb) => (
           <AssetCard
-            key={tb.token.symbol}
+            key={tb.token.contractAddress ? `${tb.token.symbol}-${tb.token.contractAddress}` : tb.token.symbol}
             balance={tb}
-            marketPrice={marketPrices[tb.token.coingeckoId]}
+            marketPrice={tb.token.coingeckoId ? marketPrices[tb.token.coingeckoId] : undefined}
             currencyPreference={currencyPreference}
             onPress={() => {
               router.push({
@@ -193,6 +220,25 @@ export default function DashboardScreen() {
           />
         ))}
       </ScrollView>
+
+      {/* Buy & Sell Modal */}
+      <BuySellModal
+        visible={showBuySellModal}
+        onClose={() => setShowBuySellModal(false)}
+      />
+
+      {/* Import Custom Token Modal */}
+      <ImportTokenModal
+        visible={showImportTokenModal}
+        onClose={() => setShowImportTokenModal(false)}
+        onTokenImported={(tok) => setToastMessage(`Token ${tok.symbol} added to assets.`)}
+      />
+
+      {/* Account Selector Modal */}
+      <AccountSelectorModal
+        visible={showAccountModal}
+        onClose={() => setShowAccountModal(false)}
+      />
 
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </ScreenWrapper>
@@ -207,19 +253,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
   },
-  addressBadge: {
+  accountBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.xs + 2,
     borderRadius: RADIUS.full,
+    gap: 6,
   },
-  addrIcon: {
-    marginRight: SPACING.xs,
+  accountDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  addressText: {
+  accountText: {
     ...TYPOGRAPHY.captionBold,
-    marginRight: SPACING.xs,
+  },
+  addressMuted: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 11,
   },
   scrollContent: {
     paddingHorizontal: SPACING.lg,
@@ -248,6 +300,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  copyAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  copyMiniIcon: {
+    marginLeft: 2,
   },
   portfolioLabel: {
     ...TYPOGRAPHY.captionBold,
@@ -298,5 +358,25 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     ...TYPOGRAPHY.h3,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  importPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm + 2,
+    paddingVertical: 4,
+    borderRadius: RADIUS.full,
+    gap: 4,
+  },
+  importText: {
+    ...TYPOGRAPHY.captionBold,
+    fontSize: 11,
+  },
+  refreshIconBtn: {
+    padding: 2,
   },
 });

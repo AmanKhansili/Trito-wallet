@@ -43,10 +43,22 @@ export const Header: React.FC<HeaderProps> = ({
             <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
           </TouchableOpacity>
         )}
-        <View>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+        <View style={styles.titleWrap}>
+          <Text
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={[styles.title, { color: colors.textPrimary }]}
+          >
+            {title}
+          </Text>
           {subtitle ? (
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[styles.subtitle, { color: colors.textSecondary }]}
+            >
+              {subtitle}
+            </Text>
           ) : null}
         </View>
       </View>
@@ -68,6 +80,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    marginRight: SPACING.sm,
   },
   backButton: {
     width: 36,
@@ -75,7 +88,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
+    marginRight: SPACING.sm,
+  },
+  titleWrap: {
+    flex: 1,
+    justifyContent: 'center',
   },
   title: {
     ...TYPOGRAPHY.h3,
@@ -87,5 +104,6 @@ const styles = StyleSheet.create({
   rightContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
   },
 });

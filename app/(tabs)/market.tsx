@@ -1,1031 +1,566 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
-  Alert,
+  RefreshControl,
+  Image,
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenWrapper } from '../../src/components/ScreenWrapper';
 import { Header } from '../../src/components/Header';
+import { Input } from '../../src/components/Input';
 import { Button } from '../../src/components/Button';
 import { NetworkBadge } from '../../src/components/NetworkBadge';
-import { ConfirmModal } from '../../src/components/ConfirmModal';
-import { Toast } from '../../src/components/Toast';
-import { PriceChart, TimeframeOption } from '../../src/components/PriceChart';
+import { BuySellModal } from '../../src/components/BuySellModal';
 import { useWallet } from '../../src/context/WalletContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../../src/constants/theme';
-import { formatFiat, shortenAddress } from '../../src/utils/formatters';
-import { transakService } from '../../src/services/transakService';
+import { formatFiat, formatPercentage } from '../../src/utils/formatters';
 import { priceService } from '../../src/services/priceService';
-import { storageService } from '../../src/services/storageService';
-import { TransakOrderType, TransakOrderRecord, TransakQuote } from '../../src/types';
+import { MarketItem } from '../../src/types';
 
-interface CryptoAssetMeta {
-  symbol: string;
-  name: string;
-  coingeckoId: string;
-  iconName: keyof typeof Ionicons.glyphMap;
-}
-
-const SUPPORTED_ASSETS: CryptoAssetMeta[] = [
-  { symbol: 'ETH', name: 'Ethereum', coingeckoId: 'ethereum', iconName: 'diamond-outline' },
-  { symbol: 'USDC', name: 'USD Coin', coingeckoId: 'usd-coin', iconName: 'cash-outline' },
-  {
-    symbol: 'USDT',
-    name: 'Tether USD',
-    coingeckoId: 'tether',
-    iconName: 'shield-checkmark-outline',
-  },
-  { symbol: 'DAI', name: 'Dai Stablecoin', coingeckoId: 'dai', iconName: 'layers-outline' },
-  { symbol: 'LINK', name: 'Chainlink', coingeckoId: 'chainlink', iconName: 'link-outline' },
-];
-
-const QUICK_AMOUNTS_INR = [1000, 2500, 5000, 10000];
-const QUICK_AMOUNTS_USD = [30, 50, 100, 250];
+type MarketFilter = 'all' | 'gainers' | 'losers' | 'large_cap' | 'stable';
 
 export default function MarketScreen() {
-  const { address, network, tokenBalances, ethBalance, marketPrices, currencyPreference } =
-    useWallet();
+  const router = useRouter();
   const { colors } = useTheme();
+  const { currencyPreference } = useWallet();
 
-  const [selectedAsset, setSelectedAsset] = useState<CryptoAssetMeta>(SUPPORTED_ASSETS[0]);
-  const [timeframe, setTimeframe] = useState<TimeframeOption>('1W');
-  const [chartData, setChartData] = useState<number[]>([]);
+  const [marketItems, setMarketItems] = useState<MarketItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeFilter, setActiveFilter] = useState<MarketFilter>('all');
+  const [selectedToken, setSelectedToken] = useState<MarketItem | null>(null);
+  const [showBuyModal, setShowBuyModal] = useState<boolean>(false);
 
-  const [productType, setProductType] = useState<TransakOrderType>('BUY');
-  const [fiatAmountStr, setFiatAmountStr] = useState<string>('5000');
-  const [cryptoSellAmountStr, setCryptoSellAmountStr] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<string>('upi');
-
-  const [liveQuote, setLiveQuote] = useState<TransakQuote | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [showSellConfirmModal, setShowSellConfirmModal] = useState<boolean>(false);
-  const [recentOrders, setRecentOrders] = useState<TransakOrderRecord[]>([]);
-
-  const currentTokenBalance = useMemo(() => {
-    return (
-      tokenBalances.find(
-        (b) => b.token.symbol.toUpperCase() === selectedAsset.symbol.toUpperCase(),
-      ) || null
-    );
-  }, [tokenBalances, selectedAsset]);
-
-  const availableBalanceFloat = useMemo(() => {
-    if (!currentTokenBalance) return 0;
-    return parseFloat(currentTokenBalance.balanceFormatted) || 0;
-  }, [currentTokenBalance]);
-
-  const ethBalanceFloat = useMemo(() => {
-    if (!ethBalance) return 0;
-    return parseFloat(ethBalance.balanceFormatted) || 0;
-  }, [ethBalance]);
-
-  const unitPrice = useMemo(() => {
-    const fromContext = marketPrices[selectedAsset.coingeckoId];
-    if (fromContext && (fromContext.usd > 0 || fromContext.inr > 0)) {
-      return currencyPreference === 'INR' ? fromContext.inr : fromContext.usd;
+  const loadMarketData = async (force: boolean = false) => {
+    try {
+      const data = await priceService.fetchTopMarkets(force);
+      setMarketItems(data);
+    } catch {
+      // Ignored
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-    return currencyPreference === 'INR' ? 288000 : 3450;
-  }, [marketPrices, selectedAsset.coingeckoId, currencyPreference]);
-
-  const change24h = useMemo(() => {
-    return marketPrices[selectedAsset.coingeckoId]?.usd24hChange ?? 2.45;
-  }, [marketPrices, selectedAsset.coingeckoId]);
-
-  const isPriceUp = change24h >= 0;
+  };
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadChart() {
-      const points = await priceService.fetchMarketChart(
-        selectedAsset.coingeckoId,
-        timeframe,
-        unitPrice,
-        change24h,
-      );
-      if (isMounted) setChartData(points);
-    }
-    loadChart();
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedAsset.coingeckoId, timeframe, unitPrice, change24h]);
-
-  const loadOrders = useCallback(async () => {
-    const orders = await storageService.getTransakOrders();
-    setRecentOrders(orders.slice(0, 5));
+    loadMarketData();
   }, []);
 
-  useEffect(() => {
-    loadOrders();
-  }, [loadOrders]);
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadMarketData(true);
+  };
 
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchQuote() {
-      const numFiat = parseFloat(fiatAmountStr) || (currencyPreference === 'INR' ? 5000 : 60);
-      try {
-        const quote = await transakService.getLiveQuote(
-          selectedAsset.symbol,
-          currencyPreference,
-          numFiat,
-          productType,
-          network.id,
-          paymentMethod,
-        );
-        if (isMounted) setLiveQuote(quote);
-      } catch {
-        // Fallback handled
-      }
-    }
-    const timer = setTimeout(fetchQuote, 400);
-    return () => {
-      isMounted = false;
-      clearTimeout(timer);
-    };
-  }, [
-    selectedAsset.symbol,
-    currencyPreference,
-    fiatAmountStr,
-    productType,
-    network.id,
-    paymentMethod,
-  ]);
+  // Filtered and searched market list
+  const filteredList = useMemo(() => {
+    let list = [...marketItems];
 
-  const quickAmounts = currencyPreference === 'INR' ? QUICK_AMOUNTS_INR : QUICK_AMOUNTS_USD;
-
-  const sellValidation = useMemo(() => {
-    const numSell = parseFloat(cryptoSellAmountStr);
-    if (!cryptoSellAmountStr || isNaN(numSell) || numSell <= 0) {
-      return { isValid: false, error: 'Enter amount to sell' };
-    }
-    if (numSell > availableBalanceFloat) {
-      return { isValid: false, error: `Insufficient ${selectedAsset.symbol} balance` };
-    }
-    if (ethBalanceFloat < 0.001) {
-      return { isValid: false, error: 'Minimum 0.001 ETH required for on-chain gas' };
-    }
-    return { isValid: true, error: null };
-  }, [cryptoSellAmountStr, availableBalanceFloat, ethBalanceFloat, selectedAsset.symbol]);
-
-  const handleInitiateBuy = async () => {
-    if (!address) {
-      Alert.alert('Wallet Not Ready', 'Please unlock your wallet first.');
-      return;
-    }
-
-    const fiatAmount = parseFloat(fiatAmountStr);
-    if (isNaN(fiatAmount) || fiatAmount <= 0) {
-      setToastMessage('Enter a valid fiat amount.');
-      return;
-    }
-
-    const minLimit = currencyPreference === 'INR' ? 500 : 25;
-    if (fiatAmount < minLimit) {
-      setToastMessage(`Minimum order is ${currencyPreference === 'INR' ? '₹' : '$'}${minLimit}`);
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const res = await transakService.openTransakCheckout({
-        walletAddress: address,
-        networkId: network.id,
-        cryptoCurrency: selectedAsset.symbol,
-        fiatCurrency: currencyPreference,
-        fiatAmount,
-        productType: 'BUY',
-        paymentMethod,
-      });
-
-      await loadOrders();
-      setToastMessage(
-        res.isDemo ? 'Opening Transak Sandbox Demo...' : 'Opening Transak Live Gateway...',
+    // Search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter(
+        (item) => item.name.toLowerCase().includes(q) || item.symbol.toLowerCase().includes(q),
       );
-    } catch {
-      Alert.alert('Gateway Error', 'Unable to launch Transak gateway.');
-    } finally {
-      setIsLoading(false);
     }
-  };
 
-  const handleInitiateSell = () => {
-    if (!sellValidation.isValid) {
-      Alert.alert('Validation Error', sellValidation.error || 'Cannot proceed with sell order.');
-      return;
+    // Category filter
+    switch (activeFilter) {
+      case 'gainers':
+        return list.filter((item) => item.priceChangePercentage24h > 0).sort((a, b) => b.priceChangePercentage24h - a.priceChangePercentage24h);
+      case 'losers':
+        return list.filter((item) => item.priceChangePercentage24h < 0).sort((a, b) => a.priceChangePercentage24h - b.priceChangePercentage24h);
+      case 'large_cap':
+        return list.filter((item) => item.marketCapRank <= 10).sort((a, b) => a.marketCapRank - b.marketCapRank);
+      case 'stable':
+        return list.filter((item) => ['USDT', 'USDC', 'DAI', 'FDUSD', 'USDD'].includes(item.symbol.toUpperCase()));
+      case 'all':
+      default:
+        return list.sort((a, b) => a.marketCapRank - b.marketCapRank);
     }
-    setShowSellConfirmModal(true);
-  };
+  }, [marketItems, searchQuery, activeFilter]);
 
-  const handleConfirmSell = async () => {
-    setShowSellConfirmModal(false);
-    setIsLoading(true);
-    try {
-      const amountToSell = parseFloat(cryptoSellAmountStr);
-      const estFiat = amountToSell * unitPrice;
-
-      const res = await transakService.openTransakCheckout({
-        walletAddress: address || '',
-        networkId: network.id,
-        cryptoCurrency: selectedAsset.symbol,
-        fiatCurrency: currencyPreference,
-        cryptoAmount: amountToSell,
-        fiatAmount: estFiat,
-        productType: 'SELL',
-      });
-
-      await loadOrders();
-      setToastMessage(
-        res.isDemo ? 'Opening Sell Flow (Sandbox)...' : 'Opening Sell Flow (Live Payout)...',
-      );
-    } catch {
-      Alert.alert('Error', 'Could not initiate off-ramp sell order.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const filters: { key: MarketFilter; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { key: 'all', label: 'All', icon: 'list-outline' },
+    { key: 'gainers', label: 'Top Gainers', icon: 'trending-up-outline' },
+    { key: 'losers', label: 'Top Losers', icon: 'trending-down-outline' },
+    { key: 'large_cap', label: 'Large Cap', icon: 'diamond-outline' },
+    { key: 'stable', label: 'Stablecoins', icon: 'shield-outline' },
+  ];
 
   return (
     <ScreenWrapper>
-      <Header
-        title="Market & Trade"
-        rightElement={<NetworkBadge />}
-      />
+      <Header title="Markets" rightElement={<NetworkBadge />} />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {!transakService.isConfigured() ? (
-          <View
-            style={[
-              styles.demoBanner,
-              { backgroundColor: colors.surfaceLight, borderColor: colors.border },
-            ]}
-          >
-            <Ionicons
-              name="information-circle-outline"
-              size={18}
-              color={colors.primary}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={[styles.demoBannerText, { color: colors.textSecondary }]}>
-              Sandbox Environment Active. Orders use Transak staging testnet.
-            </Text>
-          </View>
-        ) : null}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Search Bar */}
+        <View style={styles.searchWrapper}>
+          <Input
+            placeholder="Search coin or symbol (e.g. BTC, ETH, SOL)..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={styles.searchInput}
+            rightElement={
+              searchQuery ? (
+                <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              ) : (
+                <Ionicons name="search" size={18} color={colors.textTertiary} />
+              )
+            }
+          />
+        </View>
 
-        {/* Crypto Asset Selector Carousel */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.assetChipsRow}
-        >
-          {SUPPORTED_ASSETS.map((asset) => {
-            const isSelected = selectedAsset.symbol === asset.symbol;
+        {/* Filter Pills */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+          {filters.map((f) => {
+            const isSelected = activeFilter === f.key;
             return (
               <TouchableOpacity
-                key={asset.symbol}
+                key={f.key}
+                onPress={() => setActiveFilter(f.key)}
                 style={[
-                  styles.assetChip,
+                  styles.filterChip,
                   {
-                    backgroundColor: isSelected ? colors.primaryGlow : colors.surface,
+                    backgroundColor: isSelected ? colors.primary : colors.surfaceSubtle,
                     borderColor: isSelected ? colors.primary : colors.border,
                   },
                 ]}
-                onPress={() => setSelectedAsset(asset)}
                 activeOpacity={0.7}
               >
                 <Ionicons
-                  name={asset.iconName}
-                  size={15}
-                  color={isSelected ? colors.primary : colors.textSecondary}
-                  style={{ marginRight: 5 }}
+                  name={f.icon}
+                  size={14}
+                  color={isSelected ? '#FFFFFF' : colors.textSecondary}
+                  style={styles.filterIcon}
                 />
-                <Text
-                  style={[
-                    styles.assetChipText,
-                    {
-                      color: isSelected ? colors.primary : colors.textPrimary,
-                      fontWeight: isSelected ? '700' : '500',
-                    },
-                  ]}
-                >
-                  {asset.symbol}
+                <Text style={[styles.filterChipText, { color: isSelected ? '#FFFFFF' : colors.textPrimary }]}>
+                  {f.label}
                 </Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
 
-        {/* Live Ticker Header */}
-        <View style={styles.tickerHeader}>
-          <View>
-            <Text style={[styles.assetNameLabel, { color: colors.textSecondary }]}>
-              {selectedAsset.name} ({selectedAsset.symbol})
-            </Text>
-            <Text style={[styles.bigPriceText, { color: colors.textPrimary }]}>
-              {formatFiat(unitPrice, currencyPreference)}
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.changeBadge,
-              { backgroundColor: isPriceUp ? colors.successBackground : colors.dangerBackground },
-            ]}
-          >
-            <Ionicons
-              name={isPriceUp ? 'trending-up' : 'trending-down'}
-              size={14}
-              color={isPriceUp ? colors.success : colors.danger}
-              style={{ marginRight: 4 }}
-            />
-            <Text
-              style={[
-                styles.changeBadgeText,
-                { color: isPriceUp ? colors.success : colors.danger },
-              ]}
-            >
-              {isPriceUp ? '+' : ''}
-              {change24h.toFixed(2)}%
-            </Text>
-          </View>
+        {/* Market List */}
+        <View style={styles.listHeader}>
+          <Text style={[styles.colHeaderRank, { color: colors.textTertiary }]}>#</Text>
+          <Text style={[styles.colHeaderAsset, { color: colors.textTertiary }]}>Asset</Text>
+          <Text style={[styles.colHeaderPrice, { color: colors.textTertiary }]}>Price</Text>
+          <Text style={[styles.colHeaderChange, { color: colors.textTertiary }]}>24h Change</Text>
         </View>
 
-        {/* Interactive SVG Price Chart */}
-        <PriceChart
-          data={chartData}
-          timeframe={timeframe}
-          onTimeframeChange={setTimeframe}
-          currencyPreference={currencyPreference}
-        />
+        {filteredList.map((item) => {
+          const isPositive = item.priceChangePercentage24h >= 0;
+          const displayPrice = currencyPreference === 'INR' ? item.currentPriceInr : item.currentPriceUsd;
 
-        {/* Buy / Sell Tab Switcher */}
-        <View
-          style={[
-            styles.modeTabsRow,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
-        >
-          <TouchableOpacity
-            style={[styles.modeTab, productType === 'BUY' && { backgroundColor: colors.primary }]}
-            onPress={() => setProductType('BUY')}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name="cart-outline"
-              size={16}
-              color={productType === 'BUY' ? '#FFFFFF' : colors.textSecondary}
-              style={{ marginRight: 6 }}
-            />
-            <Text
+          return (
+            <TouchableOpacity
+              key={item.id}
+              onPress={() => setSelectedToken(item)}
               style={[
-                styles.modeTabText,
-                { color: productType === 'BUY' ? '#FFFFFF' : colors.textSecondary },
+                styles.coinRow,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
               ]}
+              activeOpacity={0.7}
             >
-              Buy Crypto
-            </Text>
-          </TouchableOpacity>
+              {/* Rank */}
+              <Text style={[styles.coinRank, { color: colors.textTertiary }]}>{item.marketCapRank}</Text>
 
-          <TouchableOpacity
-            style={[styles.modeTab, productType === 'SELL' && { backgroundColor: '#EF4444' }]}
-            onPress={() => setProductType('SELL')}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name="cash-outline"
-              size={16}
-              color={productType === 'SELL' ? '#FFFFFF' : colors.textSecondary}
-              style={{ marginRight: 6 }}
-            />
-            <Text
-              style={[
-                styles.modeTabText,
-                { color: productType === 'SELL' ? '#FFFFFF' : colors.textSecondary },
-              ]}
-            >
-              Sell Crypto
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ================= BUY TERMINAL ================= */}
-        {productType === 'BUY' ? (
-          <View
-            style={[
-              styles.terminalCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.terminalTitle, { color: colors.textPrimary }]}>
-              Instant On-Ramp ({currencyPreference} ➔ {selectedAsset.symbol})
-            </Text>
-
-            {/* Payment Method Selector */}
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Payment Method</Text>
-            <View style={styles.methodRow}>
-              {currencyPreference === 'INR' ? (
-                <>
-                  <TouchableOpacity
-                    style={[
-                      styles.methodChip,
-                      paymentMethod === 'upi' && {
-                        borderColor: colors.primary,
-                        backgroundColor: colors.primaryGlow,
-                      },
-                    ]}
-                    onPress={() => setPaymentMethod('upi')}
-                  >
-                    <Ionicons
-                      name="flash-outline"
-                      size={14}
-                      color={paymentMethod === 'upi' ? colors.primary : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.methodChipText,
-                        { color: paymentMethod === 'upi' ? colors.primary : colors.textSecondary },
-                      ]}
-                    >
-                      UPI (Instant 0%)
+              {/* Logo & Symbol / Name */}
+              <View style={styles.coinAssetCol}>
+                {item.image ? (
+                  <Image source={{ uri: item.image }} style={styles.coinImage} />
+                ) : (
+                  <View style={[styles.coinFallbackImage, { backgroundColor: colors.surfaceHighlight }]}>
+                    <Text style={[styles.coinFallbackText, { color: colors.primary }]}>
+                      {item.symbol.charAt(0)}
                     </Text>
-                  </TouchableOpacity>
+                  </View>
+                )}
+                <View style={styles.coinNameWrap}>
+                  <Text style={[styles.coinSymbol, { color: colors.textPrimary }]}>{item.symbol}</Text>
+                  <Text style={[styles.coinName, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                </View>
+              </View>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.methodChip,
-                      paymentMethod === 'card' && {
-                        borderColor: colors.primary,
-                        backgroundColor: colors.primaryGlow,
-                      },
-                    ]}
-                    onPress={() => setPaymentMethod('card')}
-                  >
-                    <Ionicons
-                      name="card-outline"
-                      size={14}
-                      color={paymentMethod === 'card' ? colors.primary : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.methodChipText,
-                        { color: paymentMethod === 'card' ? colors.primary : colors.textSecondary },
-                      ]}
-                    >
-                      Card
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={[
-                      styles.methodChip,
-                      paymentMethod === 'card' && {
-                        borderColor: colors.primary,
-                        backgroundColor: colors.primaryGlow,
-                      },
-                    ]}
-                    onPress={() => setPaymentMethod('card')}
-                  >
-                    <Ionicons
-                      name="card-outline"
-                      size={14}
-                      color={paymentMethod === 'card' ? colors.primary : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.methodChipText,
-                        { color: paymentMethod === 'card' ? colors.primary : colors.textSecondary },
-                      ]}
-                    >
-                      Card
-                    </Text>
-                  </TouchableOpacity>
+              {/* Live Price */}
+              <View style={styles.coinPriceCol}>
+                <Text style={[styles.coinPrice, { color: colors.textPrimary }]}>
+                  {formatFiat(displayPrice, currencyPreference)}
+                </Text>
+                <Text style={[styles.coinCap, { color: colors.textTertiary }]}>
+                  MCap: ${(item.marketCapUsd / 1e9).toFixed(1)}B
+                </Text>
+              </View>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.methodChip,
-                      paymentMethod === 'apple_pay' && {
-                        borderColor: colors.primary,
-                        backgroundColor: colors.primaryGlow,
-                      },
-                    ]}
-                    onPress={() => setPaymentMethod('apple_pay')}
-                  >
-                    <Ionicons
-                      name="logo-apple"
-                      size={14}
-                      color={paymentMethod === 'apple_pay' ? colors.primary : colors.textSecondary}
-                    />
-                    <Text
+              {/* 24h Change Pill */}
+              <View
+                style={[
+                  styles.changeBadge,
+                  {
+                    backgroundColor: isPositive ? colors.successBackground : colors.dangerBackground,
+                    borderColor: isPositive ? colors.success : colors.danger,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={isPositive ? 'caret-up' : 'caret-down'}
+                  size={12}
+                  color={isPositive ? colors.success : colors.danger}
+                  style={styles.arrowIcon}
+                />
+                <Text style={[styles.changeText, { color: isPositive ? colors.success : colors.danger }]}>
+                  {Math.abs(item.priceChangePercentage24h).toFixed(2)}%
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* Token Detail Quick Modal */}
+      {selectedToken && (
+        <Modal visible={!!selectedToken} transparent animationType="slide" onRequestClose={() => setSelectedToken(null)}>
+          <TouchableWithoutFeedback onPress={() => setSelectedToken(null)}>
+            <View style={styles.overlay}>
+              <TouchableWithoutFeedback>
+                <View style={[styles.modalBox, { backgroundColor: colors.surface, borderColor: colors.borderStrong }]}>
+                  <View style={styles.modalHeader}>
+                    <View style={styles.modalTokenTitle}>
+                      {selectedToken.image ? (
+                        <Image source={{ uri: selectedToken.image }} style={styles.modalTokenLogo} />
+                      ) : null}
+                      <View>
+                        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                          {selectedToken.name} ({selectedToken.symbol})
+                        </Text>
+                        <Text style={[styles.modalRank, { color: colors.textSecondary }]}>
+                          Rank #{selectedToken.marketCapRank}
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={() => setSelectedToken(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close" size={24} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.modalPriceSection}>
+                    <Text style={[styles.modalBigPrice, { color: colors.textPrimary }]}>
+                      {formatFiat(
+                        currencyPreference === 'INR' ? selectedToken.currentPriceInr : selectedToken.currentPriceUsd,
+                        currencyPreference,
+                      )}
+                    </Text>
+                    <View
                       style={[
-                        styles.methodChipText,
+                        styles.changeBadge,
                         {
-                          color:
-                            paymentMethod === 'apple_pay' ? colors.primary : colors.textSecondary,
+                          backgroundColor:
+                            selectedToken.priceChangePercentage24h >= 0
+                              ? colors.successBackground
+                              : colors.dangerBackground,
                         },
                       ]}
                     >
-                      Apple Pay
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
+                      <Text
+                        style={[
+                          styles.changeText,
+                          {
+                            color:
+                              selectedToken.priceChangePercentage24h >= 0
+                                ? colors.success
+                                : colors.danger,
+                          },
+                        ]}
+                      >
+                        {formatPercentage(selectedToken.priceChangePercentage24h)}
+                      </Text>
+                    </View>
+                  </View>
 
-            {/* Fiat Amount Input */}
-            <Text
-              style={[styles.inputLabel, { color: colors.textSecondary, marginTop: SPACING.sm }]}
-            >
-              You Pay (Fiat)
-            </Text>
-            <View
-              style={[
-                styles.inputContainer,
-                { backgroundColor: colors.surfaceSubtle, borderColor: colors.border },
-              ]}
-            >
-              <TextInput
-                value={fiatAmountStr}
-                onChangeText={setFiatAmountStr}
-                placeholder="0.00"
-                placeholderTextColor={colors.textTertiary}
-                keyboardType="numeric"
-                style={[styles.numericInput, { color: colors.textPrimary }]}
-              />
-              <View style={[styles.currencyBadge, { backgroundColor: colors.surfaceLight }]}>
-                <Text style={[styles.currencyBadgeText, { color: colors.textPrimary }]}>
-                  {currencyPreference}
-                </Text>
-              </View>
-            </View>
+                  <View style={[styles.statsGrid, { backgroundColor: colors.surfaceSubtle }]}>
+                    <View style={styles.statCell}>
+                      <Text style={[styles.statLabel, { color: colors.textTertiary }]}>24h High</Text>
+                      <Text style={[styles.statVal, { color: colors.textPrimary }]}>
+                        ${selectedToken.high24hUsd.toLocaleString()}
+                      </Text>
+                    </View>
+                    <View style={styles.statCell}>
+                      <Text style={[styles.statLabel, { color: colors.textTertiary }]}>24h Low</Text>
+                      <Text style={[styles.statVal, { color: colors.textPrimary }]}>
+                        ${selectedToken.low24hUsd.toLocaleString()}
+                      </Text>
+                    </View>
+                    <View style={styles.statCell}>
+                      <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Market Cap</Text>
+                      <Text style={[styles.statVal, { color: colors.textPrimary }]}>
+                        ${(selectedToken.marketCapUsd / 1e9).toFixed(2)}B
+                      </Text>
+                    </View>
+                    <View style={styles.statCell}>
+                      <Text style={[styles.statLabel, { color: colors.textTertiary }]}>24h Volume</Text>
+                      <Text style={[styles.statVal, { color: colors.textPrimary }]}>
+                        ${(selectedToken.totalVolumeUsd / 1e6).toFixed(1)}M
+                      </Text>
+                    </View>
+                  </View>
 
-            {/* Quick Pills */}
-            <View style={styles.quickRow}>
-              {quickAmounts.map((amt) => (
-                <TouchableOpacity
-                  key={amt}
-                  style={[
-                    styles.quickBtn,
-                    { borderColor: colors.border, backgroundColor: colors.surfaceSubtle },
-                  ]}
-                  onPress={() => setFiatAmountStr(amt.toString())}
-                >
-                  <Text style={[styles.quickBtnText, { color: colors.textSecondary }]}>
-                    {currencyPreference === 'INR' ? `₹${amt}` : `$${amt}`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Live Fee Breakdown */}
-            <View
-              style={[
-                styles.breakdownBox,
-                { backgroundColor: colors.surfaceSubtle, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.breakdownRow}>
-                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
-                  Base Price:
-                </Text>
-                <Text style={[styles.breakdownValue, { color: colors.textPrimary }]}>
-                  1 {selectedAsset.symbol} ≈ {formatFiat(unitPrice, currencyPreference)}
-                </Text>
-              </View>
-              <View style={styles.breakdownRow}>
-                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
-                  Gateway Fee (Transak):
-                </Text>
-                <Text style={[styles.breakdownValue, { color: colors.textPrimary }]}>
-                  {liveQuote
-                    ? formatFiat(liveQuote.transakFee, currencyPreference)
-                    : 'Calculating...'}
-                </Text>
-              </View>
-              <View style={styles.breakdownRow}>
-                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
-                  Estimated Delivery:
-                </Text>
-                <Text style={[styles.breakdownValueBold, { color: colors.success }]}>
-                  {liveQuote
-                    ? `≈ ${liveQuote.cryptoAmount.toFixed(5)} ${selectedAsset.symbol}`
-                    : 'Calculating...'}
-                </Text>
-              </View>
-            </View>
-
-            <Button
-              title={`Buy ${selectedAsset.symbol}`}
-              onPress={handleInitiateBuy}
-              loading={isLoading}
-              style={{ marginTop: SPACING.md }}
-            />
-          </View>
-        ) : (
-          /* ================= SELL TERMINAL ================= */
-          <View
-            style={[
-              styles.terminalCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.terminalTitle, { color: colors.textPrimary }]}>
-              Instant Off-Ramp ({selectedAsset.symbol} ➔ Bank Payout)
-            </Text>
-
-            <View style={styles.balanceInfoRow}>
-              <Text style={[styles.balanceInfoLabel, { color: colors.textSecondary }]}>
-                Available {selectedAsset.symbol}:
-              </Text>
-              <Text style={[styles.balanceInfoValue, { color: colors.primary }]}>
-                {availableBalanceFloat.toFixed(4)} {selectedAsset.symbol}
-              </Text>
-            </View>
-
-            <Text
-              style={[styles.inputLabel, { color: colors.textSecondary, marginTop: SPACING.sm }]}
-            >
-              Amount to Sell
-            </Text>
-            <View
-              style={[
-                styles.inputContainer,
-                { backgroundColor: colors.surfaceSubtle, borderColor: colors.border },
-              ]}
-            >
-              <TextInput
-                value={cryptoSellAmountStr}
-                onChangeText={setCryptoSellAmountStr}
-                placeholder="0.00"
-                placeholderTextColor={colors.textTertiary}
-                keyboardType="numeric"
-                style={[styles.numericInput, { color: colors.textPrimary }]}
-              />
-              <TouchableOpacity
-                style={[styles.currencyBadge, { backgroundColor: colors.primaryGlow }]}
-                onPress={() => setCryptoSellAmountStr(availableBalanceFloat.toString())}
-              >
-                <Text
-                  style={[styles.currencyBadgeText, { color: colors.primary, fontWeight: '700' }]}
-                >
-                  MAX
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {sellValidation.error ? (
-              <Text style={[styles.warningText, { color: colors.danger }]}>
-                {sellValidation.error}
-              </Text>
-            ) : null}
-
-            {/* Estimated Fiat Payout */}
-            <View
-              style={[
-                styles.breakdownBox,
-                { backgroundColor: colors.surfaceSubtle, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.breakdownRow}>
-                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>Rate:</Text>
-                <Text style={[styles.breakdownValue, { color: colors.textPrimary }]}>
-                  1 {selectedAsset.symbol} = {formatFiat(unitPrice, currencyPreference)}
-                </Text>
-              </View>
-              <View style={styles.breakdownRow}>
-                <Text style={[styles.breakdownLabel, { color: colors.textSecondary }]}>
-                  Estimated Payout:
-                </Text>
-                <Text style={[styles.breakdownValueBold, { color: '#EF4444' }]}>
-                  {formatFiat(
-                    (parseFloat(cryptoSellAmountStr) || 0) * unitPrice,
-                    currencyPreference,
-                  )}
-                </Text>
-              </View>
-            </View>
-
-            <Button
-              title={`Sell ${selectedAsset.symbol} for ${currencyPreference}`}
-              variant="danger"
-              onPress={handleInitiateSell}
-              loading={isLoading}
-              style={{ marginTop: SPACING.md }}
-            />
-          </View>
-        )}
-
-        {/* Recent Orders History */}
-        {recentOrders.length > 0 ? (
-          <View
-            style={[
-              styles.ordersCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.ordersTitle, { color: colors.textPrimary }]}>Recent Orders</Text>
-            {recentOrders.map((order) => (
-              <View
-                key={order.orderId}
-                style={[styles.orderItem, { borderBottomColor: colors.border }]}
-              >
-                <View>
-                  <Text
-                    style={[
-                      styles.orderType,
-                      { color: order.orderType === 'BUY' ? colors.success : '#EF4444' },
-                    ]}
-                  >
-                    {order.orderType} {order.cryptoCurrency}
-                  </Text>
-                  <Text style={[styles.orderSub, { color: colors.textTertiary }]}>
-                    {new Date(order.timestamp).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}{' '}
-                    • {order.fiatCurrency} {order.fiatAmount}
-                  </Text>
+                  <View style={styles.modalActionRow}>
+                    <Button
+                      title="Buy with UPI/Card"
+                      variant="primary"
+                      onPress={() => {
+                        setSelectedToken(null);
+                        setShowBuyModal(true);
+                      }}
+                      style={styles.modalBtn}
+                    />
+                    <Button
+                      title="Trade in Swap"
+                      variant="secondary"
+                      onPress={() => {
+                        setSelectedToken(null);
+                        router.push('/(tabs)/swap');
+                      }}
+                      style={styles.modalBtn}
+                    />
+                  </View>
                 </View>
-                <View style={[styles.orderStatusPill, { backgroundColor: colors.surfaceSubtle }]}>
-                  <Text style={[styles.orderStatusText, { color: colors.textSecondary }]}>
-                    {order.status}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-      </ScrollView>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+      )}
 
-      {/* Sell Authorization Confirm Modal */}
-      <ConfirmModal
-        visible={showSellConfirmModal}
-        title="Authorize Off-Ramp Sell"
-        subtitle="You will transfer crypto to Transak custody for bank payout"
-        confirmTitle="Authorize & Sell"
-        isDanger
-        onCancel={() => setShowSellConfirmModal(false)}
-        onConfirm={handleConfirmSell}
-      >
-        <View style={styles.modalBody}>
-          <Text style={[styles.modalText, { color: colors.textSecondary }]}>
-            Amount:{' '}
-            <Text style={{ color: colors.textPrimary, fontWeight: '700' }}>
-              {cryptoSellAmountStr} {selectedAsset.symbol}
-            </Text>
-          </Text>
-          <Text style={[styles.modalText, { color: colors.textSecondary }]}>
-            Destination: <Text style={{ color: colors.textPrimary }}>Transak Payout Service</Text>
-          </Text>
-        </View>
-      </ConfirmModal>
-
-      {toastMessage ? (
-        <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
-      ) : null}
+      {/* Buy / Sell Gateway Modal */}
+      <BuySellModal visible={showBuyModal} onClose={() => setShowBuyModal(false)} />
     </ScreenWrapper>
   );
 }
 
 const styles = StyleSheet.create({
   scrollContent: {
-    padding: SPACING.md,
+    paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.xxl,
   },
-  demoBanner: {
+  searchWrapper: {
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.xs,
+  },
+  searchInput: {
+    height: 44,
+  },
+  filterScroll: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.sm,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    gap: SPACING.xs + 2,
     marginBottom: SPACING.md,
   },
-  demoBannerText: {
-    ...TYPOGRAPHY.caption,
-    flex: 1,
-  },
-  assetChipsRow: {
-    paddingBottom: SPACING.sm,
-    gap: SPACING.xs,
-  },
-  assetChip: {
+  filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs + 2,
     borderRadius: RADIUS.full,
     borderWidth: 1,
   },
-  assetChipText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
+  filterIcon: {
+    marginRight: 4,
   },
-  tickerHeader: {
+  filterChipText: {
+    ...TYPOGRAPHY.captionBold,
+  },
+  listHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    marginBottom: SPACING.xs,
   },
-  assetNameLabel: {
+  colHeaderRank: {
+    ...TYPOGRAPHY.captionBold,
+    width: 28,
+  },
+  colHeaderAsset: {
+    ...TYPOGRAPHY.captionBold,
+    flex: 1,
+  },
+  colHeaderPrice: {
+    ...TYPOGRAPHY.captionBold,
+    width: 100,
+    textAlign: 'right',
+  },
+  colHeaderChange: {
+    ...TYPOGRAPHY.captionBold,
+    width: 80,
+    textAlign: 'right',
+  },
+  coinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    marginBottom: SPACING.sm,
+  },
+  coinRank: {
+    ...TYPOGRAPHY.captionBold,
+    width: 26,
+    fontSize: 11,
+  },
+  coinAssetCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  coinImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: SPACING.sm,
+  },
+  coinFallbackImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.sm,
+  },
+  coinFallbackText: {
+    ...TYPOGRAPHY.bodyBold,
+  },
+  coinNameWrap: {
+    flex: 1,
+  },
+  coinSymbol: {
+    ...TYPOGRAPHY.bodyBold,
+  },
+  coinName: {
     ...TYPOGRAPHY.caption,
-    fontSize: 12,
+    fontSize: 11,
+    marginTop: 1,
   },
-  bigPriceText: {
-    ...TYPOGRAPHY.h2,
-    fontSize: 22,
-    marginTop: 2,
+  coinPriceCol: {
+    alignItems: 'flex-end',
+    width: 95,
+    marginRight: SPACING.sm,
+  },
+  coinPrice: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 13,
+  },
+  coinCap: {
+    ...TYPOGRAPHY.caption,
+    fontSize: 10,
+    marginTop: 1,
   },
   changeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: RADIUS.full,
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
+    width: 72,
   },
-  changeBadgeText: {
+  arrowIcon: {
+    marginRight: 2,
+  },
+  changeText: {
     ...TYPOGRAPHY.captionBold,
-    fontSize: 12,
+    fontSize: 11,
   },
-  modeTabsRow: {
-    flexDirection: 'row',
-    borderRadius: RADIUS.full,
-    padding: 3,
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  modalBox: {
+    borderTopLeftRadius: RADIUS.xl,
+    borderTopRightRadius: RADIUS.xl,
     borderWidth: 1,
+    padding: SPACING.xl,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  modalTokenTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  modalTokenLogo: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  modalTitle: {
+    ...TYPOGRAPHY.h3,
+  },
+  modalRank: {
+    ...TYPOGRAPHY.caption,
+    marginTop: 2,
+  },
+  modalPriceSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginVertical: SPACING.md,
   },
-  modeTab: {
-    flex: 1,
+  modalBigPrice: {
+    ...TYPOGRAPHY.h1,
+    fontSize: 28,
+  },
+  statsGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    borderRadius: RADIUS.full,
-  },
-  modeTabText: {
-    ...TYPOGRAPHY.captionBold,
-    fontSize: 13,
-  },
-  terminalCard: {
-    padding: SPACING.lg,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1,
-    marginBottom: SPACING.md,
-  },
-  terminalTitle: {
-    ...TYPOGRAPHY.bodyBold,
-    marginBottom: SPACING.md,
-  },
-  inputLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-    marginBottom: SPACING.xs,
-  },
-  methodRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.xs,
-  },
-  methodChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
+    flexWrap: 'wrap',
     borderRadius: RADIUS.md,
-    borderWidth: 1,
-    gap: 4,
+    padding: SPACING.md,
+    marginVertical: SPACING.md,
   },
-  methodChipText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    paddingHorizontal: SPACING.md,
+  statCell: {
+    width: '50%',
     paddingVertical: SPACING.xs,
   },
-  numericInput: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '700',
+  statLabel: {
+    ...TYPOGRAPHY.caption,
   },
-  currencyBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: RADIUS.md,
+  statVal: {
+    ...TYPOGRAPHY.bodyBold,
+    marginTop: 2,
   },
-  currencyBadgeText: {
-    ...TYPOGRAPHY.captionBold,
-    fontSize: 12,
-  },
-  quickRow: {
+  modalActionRow: {
     flexDirection: 'row',
-    gap: SPACING.xs,
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  quickBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-  },
-  quickBtnText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11,
-  },
-  breakdownBox: {
-    padding: SPACING.md,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    gap: SPACING.xs,
-  },
-  breakdownRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  breakdownLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-  },
-  breakdownValue: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-  },
-  breakdownValueBold: {
-    ...TYPOGRAPHY.captionBold,
-    fontSize: 12,
-  },
-  balanceInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.xs,
-  },
-  balanceInfoLabel: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 12,
-  },
-  balanceInfoValue: {
-    ...TYPOGRAPHY.captionBold,
-    fontSize: 12,
-  },
-  warningText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11,
-    marginTop: 4,
-  },
-  ordersCard: {
-    padding: SPACING.md,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
+    gap: SPACING.md,
     marginTop: SPACING.md,
+    marginBottom: SPACING.lg,
   },
-  ordersTitle: {
-    ...TYPOGRAPHY.captionBold,
-    fontSize: 13,
-    marginBottom: SPACING.sm,
-  },
-  orderItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-  },
-  orderType: {
-    ...TYPOGRAPHY.captionBold,
-    fontSize: 12,
-  },
-  orderSub: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 11,
-  },
-  orderStatusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: RADIUS.sm,
-  },
-  orderStatusText: {
-    ...TYPOGRAPHY.caption,
-    fontSize: 10,
-  },
-  modalBody: {
-    gap: SPACING.xs,
-    paddingVertical: SPACING.sm,
-  },
-  modalText: {
-    ...TYPOGRAPHY.body,
-    fontSize: 13,
+  modalBtn: {
+    flex: 1,
   },
 });
