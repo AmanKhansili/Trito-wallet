@@ -22,7 +22,8 @@ export const UNISWAP_CONTRACTS: Record<NetworkId, UniswapContracts> = {
   },
 };
 
-export const UNISWAP_POOL_FEES = [3000, 500, 10000]; // 0.3%, 0.05%, 1%
+export const UNISWAP_POOL_FEES = [3000, 500, 10000]; 
+// 0.3%, 0.05%, 1%
 
 // Minimal ERC20 ABI
 export const ERC20_ABI = [

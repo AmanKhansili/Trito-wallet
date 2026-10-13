@@ -30,7 +30,6 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
       decimals: 18,
     },
   },
-  
 };
 
 export const DEFAULT_NETWORK_ID: NetworkId = 'sepolia';
