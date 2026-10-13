@@ -1,11 +1,17 @@
-export type NetworkId = 'sepolia' | 'mainnet';
-export type SwapProviderId = 'uniswap' | '0x';
+import { BigNumberish } from 'ethers';
+
+export type NetworkId = 'mainnet' | 'sepolia';
+
+export type CurrencyPreference = 'USD' | 'INR';
+
+export type Timeframe = '1D' | '1W' | '1M' | '1Y';
 
 export interface NetworkConfig {
   id: NetworkId;
   name: string;
   chainId: number;
   rpcUrl: string;
+  fallbackRpcUrls: string[];
   explorerUrl: string;
   nativeCurrency: {
     name: string;
@@ -15,32 +21,28 @@ export interface NetworkConfig {
   isTestnet: boolean;
 }
 
-export type TokenType = 'NATIVE' | 'ERC20';
-
-export interface TokenConfig {
+export interface Token {
+  address?: string; // Contract address (undefined for native ETH)
+  contractAddress?: string; // Alias for consistency across codebase
   symbol: string;
   name: string;
   decimals: number;
-  contractAddress?: string;
-  network: NetworkId;
-  type: TokenType;
-  icon: string;
-  coingeckoId: string;
+  coingeckoId?: string;
   isCustom?: boolean;
 }
 
 export interface TokenBalance {
-  token: TokenConfig;
-  balanceRaw: bigint;
+  token: Token;
+  balanceRaw: BigNumberish;
   balanceFormatted: string;
-  balanceUsd: number;
-  balanceInr: number;
+  balanceUsd?: number;
+  balanceInr?: number;
 }
 
 export interface MarketPrice {
   usd: number;
   inr: number;
-  usd24hChange?: number;
+  usd24hChange: number;
 }
 
 export type MarketPricesMap = Record<string, MarketPrice>;
@@ -60,132 +62,87 @@ export interface MarketItem {
   marketCapRank: number;
 }
 
-export type CurrencyPreference = 'USD' | 'INR';
-
+export type TransactionType = 'send' | 'receive' | 'swap' | 'approve';
 export type TransactionStatus = 'pending' | 'confirmed' | 'failed';
-
-export type TransactionType = 'send' | 'receive' | 'swap';
 
 export interface TransactionRecord {
   hash: string;
   type: TransactionType;
   status: TransactionStatus;
-  tokenSymbol: string;
-  amount: string;
+  timestamp: number;
   from: string;
   to: string;
+  value: string;
+  symbol: string;
   networkId: NetworkId;
-  timestamp: number;
   gasUsed?: string;
-  effectiveGasPrice?: string;
-  swapDetails?: {
-    toTokenSymbol: string;
-    toAmount: string;
-    rate: string;
-  };
+  gasPrice?: string;
+  error?: string;
+}
+
+export interface StoredWalletMetadata {
+  address: string;
+  accountsCount: number;
+  activeAccountIndex: number;
+  createdAt: number;
+  isBackedUp: boolean;
+}
+
+export interface DerivedAccount {
+  index: number;
+  address: string;
+  name: string;
+}
+
+export interface GasOption {
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  gasPrice?: bigint;
 }
 
 export type GasSpeedTier = 'standard' | 'fast' | 'instant';
 
-export interface GasEstimate {
-  gasLimit: bigint;
-  gasPrice: bigint;
-  maxFeePerGas?: bigint;
-  maxPriorityFeePerGas?: bigint;
-  totalCostWei: bigint;
-  totalCostEth: string;
-  totalCostUsd: number;
-  tier?: GasSpeedTier;
+export interface GasTierEstimate {
+  tier: GasSpeedTier;
+  label: string;
+  estimatedTime: string;
+  maxFeeGwei: string;
+  priorityFeeGwei: string;
+  estimatedFeeUsd: number;
+}
+
+export interface FeeDataResult {
+  gasPrice: bigint | null;
+  maxFeePerGas: bigint | null;
+  maxPriorityFeePerGas: bigint | null;
+}
+
+export interface SwapRoute {
+  routerAddress: string;
+  path: string[];
+  fees: number[];
+  version: 'v3';
 }
 
 export interface SwapQuote {
-  fromToken: TokenConfig;
-  toToken: TokenConfig;
-  amountInRaw: bigint;
-  amountInFormatted: string;
-  amountOutRaw: bigint;
-  amountOutFormatted: string;
-  amountOutMinimumRaw: bigint;
-  amountOutMinimumFormatted: string;
-  executionPrice: number;
-  priceImpactPercent: number;
-  slippageTolerance: number;
-  poolFee: number;
-  estimatedGasUnits: bigint;
-  estimatedGasCostEth: string;
-  estimatedGasCostUsd: number;
-  route: string[];
-  liquiditySource: string;
-  provider: SwapProviderId;
-  quotedAt: number;
-  marketDeviationPercent?: number;
-  warnings?: string[];
-  zeroEx?: {
-    to: string;
-    data: string;
-    value: string;
-    gas?: string;
-    allowanceTarget?: string;
-  };
+  inputToken: Token;
+  outputToken: Token;
+  inputAmount: string;
+  expectedOutputAmount: string;
+  minimumOutputAmount: string;
+  priceImpact: number;
+  executionPrice: string;
+  gasEstimate: bigint;
+  route: SwapRoute;
+  needsApproval: boolean;
 }
 
-export type SwapStepId =
-  | 'idle'
-  | 'quoting'
-  | 'checking_balance'
-  | 'checking_allowance'
-  | 'approving'
-  | 'approval_confirmed'
-  | 'estimating_gas'
-  | 'submitting_swap'
-  | 'waiting_confirmation'
-  | 'confirmed'
-  | 'failed';
-
-export interface SwapStepState {
-  step: SwapStepId;
-  title: string;
-  description: string;
-  txHash?: string;
-  error?: string;
-}
-
-export interface AuthState {
-  isReady: boolean;
-  hasWallet: boolean;
-  unlocked: boolean;
-  isBiometricsSupported: boolean;
-  isBiometricsEnabled: boolean;
-  autoLockMinutes: number;
-}
-
-export interface WalletState {
-  address: string | null;
-  network: NetworkConfig;
-  ethBalance: TokenBalance | null;
-  tokenBalances: TokenBalance[];
-  totalPortfolioValueUsd: number;
-  totalPortfolioValueInr: number;
-  isLoading: boolean;
-  isRefreshing: boolean;
-  error: string | null;
-  lastUpdated: number | null;
-}
-
-// ==================== ADVANCED EXTENSION TYPES ====================
-
-export interface AddressBookContact {
+export interface Contact {
   id: string;
   name: string;
   address: string;
-  networkId?: NetworkId;
-  addedAt: number;
-}
-
-export interface WalletAccount {
-  index: number;
-  name: string;
-  address: string;
+  note?: string;
+  createdAt: number;
 }
 
 export type FiatRampProvider = 'onramp.money' | 'transak';
@@ -198,4 +155,5 @@ export interface FiatRampParams {
   fiatCurrency: 'INR' | 'USD';
   walletAddress: string;
   networkId: NetworkId;
+  fiatAmount?: number;
 }

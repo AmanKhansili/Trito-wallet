@@ -9,6 +9,8 @@ export interface RampProviderInfo {
   supportedPaymentMethods: string[];
   supportedFiats: string[];
   badge: string;
+  minAmountInr: number;
+  minAmountUsd: number;
 }
 
 export const RAMP_PROVIDERS: RampProviderInfo[] = [
@@ -16,17 +18,21 @@ export const RAMP_PROVIDERS: RampProviderInfo[] = [
     id: 'onramp.money',
     name: 'Onramp.money',
     description: 'Direct Instant UPI & IMPS bank transfer. Regulated & registered with FIU-India.',
-    supportedPaymentMethods: ['UPI (GPay / PhonePe / Paytm)', 'IMPS', 'Bank Transfer'],
+    supportedPaymentMethods: ['UPI (GPay / PhonePe / Paytm / BHIM)', 'IMPS Bank Transfer'],
     supportedFiats: ['INR', 'TRY', 'AED', 'VND'],
-    badge: 'Best for India (UPI)',
+    badge: 'Best for India (Instant UPI)',
+    minAmountInr: 500,
+    minAmountUsd: 10,
   },
   {
     id: 'transak',
     name: 'Transak',
     description: 'Global licensed on/off-ramp supporting Credit/Debit cards, Apple Pay, and Google Pay in 160+ countries.',
-    supportedPaymentMethods: ['Credit / Debit Card', 'Apple Pay', 'Google Pay', 'Bank Wire'],
+    supportedPaymentMethods: ['Credit / Debit Card (Visa/Mastercard)', 'Apple Pay', 'Google Pay', 'Bank Wire'],
     supportedFiats: ['USD', 'EUR', 'GBP', 'INR'],
     badge: 'Global (Cards & Apple Pay)',
+    minAmountInr: 1500,
+    minAmountUsd: 20,
   },
 ];
 
@@ -44,7 +50,7 @@ export const fiatRampService = {
    * bank payments, AML, and tax compliance.
    */
   buildRampUrl(params: FiatRampParams): string {
-    const { provider, type, cryptoCurrency, fiatCurrency, walletAddress, networkId } = params;
+    const { provider, type, cryptoCurrency, fiatCurrency, walletAddress, networkId, fiatAmount } = params;
 
     const networkParam = networkId === 'sepolia' ? 'sepolia' : 'ethereum';
 
@@ -52,18 +58,23 @@ export const fiatRampService = {
       const fiatCode = fiatCurrency === 'INR' ? '1' : '1';
       const action = type === 'sell' ? 'sell' : 'buy';
       const base = `https://onramp.money/main/${action}/`;
-      const query = buildQueryString({
+      const queryParams: Record<string, string | number> = {
         appId: '1',
         walletAddress: walletAddress,
         fiatType: fiatCode,
         coinCode: cryptoCurrency.toLowerCase(),
         network: networkParam,
-      });
+      };
 
+      if (fiatAmount && fiatAmount > 0) {
+        queryParams.fiatAmount = Math.round(fiatAmount);
+      }
+
+      const query = buildQueryString(queryParams);
       return `${base}?${query}`;
     } else {
       const base = 'https://global.transak.com/';
-      const query = buildQueryString({
+      const queryParams: Record<string, string | number> = {
         apiKey: '4b8c9d2f-1a3e-4f7b-9c2d-8e4a1b3c5d7e',
         walletAddress: walletAddress,
         fiatCurrency: fiatCurrency,
@@ -71,8 +82,13 @@ export const fiatRampService = {
         cryptoCurrencyList: 'ETH,USDC,USDT,DAI',
         network: networkParam,
         productsAvailed: type === 'sell' ? 'SELL' : 'BUY',
-      });
+      };
 
+      if (fiatAmount && fiatAmount > 0) {
+        queryParams.defaultFiatAmount = Math.round(fiatAmount);
+      }
+
+      const query = buildQueryString(queryParams);
       return `${base}?${query}`;
     }
   },
@@ -90,6 +106,19 @@ export const fiatRampService = {
     } else {
       throw new Error('Unable to open web browser on this device.');
     }
+  },
+
+  /**
+   * Opens Sepolia Testnet Faucets for users to claim free test ETH.
+   */
+  async openSepoliaFaucet(walletAddress?: string | null): Promise<void> {
+    const targetAddress = walletAddress || undefined;
+    const url = targetAddress
+      ? `https://cloud.google.com/application/faucets/ethereum/sepolia?address=${encodeURIComponent(targetAddress)}`
+      : 'https://cloud.google.com/application/faucets/ethereum/sepolia';
+    await Linking.openURL(url).catch(async () => {
+      await Linking.openURL('https://sepoliafaucet.com');
+    });
   },
 
   getProviders(): RampProviderInfo[] {

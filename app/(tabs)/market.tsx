@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,30 +15,39 @@ import { Ionicons } from '@expo/vector-icons';
 import { ScreenWrapper } from '../../src/components/ScreenWrapper';
 import { Header } from '../../src/components/Header';
 import { Input } from '../../src/components/Input';
-import { Button } from '../../src/components/Button';
 import { NetworkBadge } from '../../src/components/NetworkBadge';
 import { BuySellModal } from '../../src/components/BuySellModal';
+import { PriceChart } from '../../src/components/PriceChart';
 import { useWallet } from '../../src/context/WalletContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../../src/constants/theme';
 import { formatFiat, formatPercentage } from '../../src/utils/formatters';
 import { priceService } from '../../src/services/priceService';
-import { MarketItem } from '../../src/types';
+import { MarketItem, FiatRampType, Timeframe } from '../../src/types';
 
 type MarketFilter = 'all' | 'gainers' | 'losers' | 'large_cap' | 'stable';
 
 export default function MarketScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { currencyPreference } = useWallet();
+  const { currencyPreference, setCurrencyPreference } = useWallet();
 
   const [marketItems, setMarketItems] = useState<MarketItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<MarketFilter>('all');
+
+  // Selected Token for detailed chart view
   const [selectedToken, setSelectedToken] = useState<MarketItem | null>(null);
+  const [chartData, setChartData] = useState<number[]>([]);
+  const [chartTimeframe, setChartTimeframe] = useState<Timeframe>('1D');
+  const [chartLoading, setChartLoading] = useState<boolean>(false);
+
+  // Buy/Sell Modal
   const [showBuyModal, setShowBuyModal] = useState<boolean>(false);
+  const [rampModalType, setRampModalType] = useState<FiatRampType>('buy');
+  const [rampModalCrypto, setRampModalCrypto] = useState<string>('ETH');
 
   const loadMarketData = async (force: boolean = false) => {
     try {
@@ -61,11 +70,58 @@ export default function MarketScreen() {
     loadMarketData(true);
   };
 
+  // Load chart in exact currency preference (USD or INR)
+  const loadChartData = useCallback(
+    async (token: MarketItem, tf: Timeframe) => {
+      setChartLoading(true);
+      try {
+        const unitPrice =
+          currencyPreference === 'INR' ? token.currentPriceInr : token.currentPriceUsd;
+        const points = await priceService.fetchMarketChart(
+          token.id,
+          tf,
+          currencyPreference,
+          unitPrice,
+        );
+        setChartData(points);
+      } catch {
+        setChartData([]);
+      } finally {
+        setChartLoading(false);
+      }
+    },
+    [currencyPreference],
+  );
+
+  const handleSelectToken = (token: MarketItem) => {
+    setSelectedToken(token);
+    setChartTimeframe('1D');
+    loadChartData(token, '1D');
+  };
+
+  const handleTimeframeChange = (tf: Timeframe) => {
+    setChartTimeframe(tf);
+    if (selectedToken) {
+      loadChartData(selectedToken, tf);
+    }
+  };
+
+  const handleOpenBuyModal = (type: FiatRampType, symbol: string) => {
+    setSelectedToken(null);
+    setRampModalType(type);
+    setRampModalCrypto(symbol);
+    setShowBuyModal(true);
+  };
+
+  const toggleCurrency = () => {
+    const next = currencyPreference === 'USD' ? 'INR' : 'USD';
+    setCurrencyPreference(next);
+  };
+
   // Filtered and searched market list
   const filteredList = useMemo(() => {
     let list = [...marketItems];
 
-    // Search query filter
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter(
@@ -73,7 +129,6 @@ export default function MarketScreen() {
       );
     }
 
-    // Category filter
     switch (activeFilter) {
       case 'gainers':
         return list.filter((item) => item.priceChangePercentage24h > 0).sort((a, b) => b.priceChangePercentage24h - a.priceChangePercentage24h);
@@ -99,7 +154,17 @@ export default function MarketScreen() {
 
   return (
     <ScreenWrapper>
-      <Header title="Markets" rightElement={<NetworkBadge />} />
+      <Header
+        title="Markets"
+        rightElement={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity onPress={toggleCurrency} style={[styles.currencyPill, { backgroundColor: colors.surfaceHighlight }]}>
+              <Text style={[styles.currencyPillText, { color: colors.primary }]}>{currencyPreference}</Text>
+            </TouchableOpacity>
+            <NetworkBadge />
+          </View>
+        }
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -158,11 +223,13 @@ export default function MarketScreen() {
           })}
         </ScrollView>
 
-        {/* Market List */}
+        {/* Market List Table */}
         <View style={styles.listHeader}>
           <Text style={[styles.colHeaderRank, { color: colors.textTertiary }]}>#</Text>
           <Text style={[styles.colHeaderAsset, { color: colors.textTertiary }]}>Asset</Text>
-          <Text style={[styles.colHeaderPrice, { color: colors.textTertiary }]}>Price</Text>
+          <Text style={[styles.colHeaderPrice, { color: colors.textTertiary }]}>
+            Price ({currencyPreference})
+          </Text>
           <Text style={[styles.colHeaderChange, { color: colors.textTertiary }]}>24h Change</Text>
         </View>
 
@@ -173,7 +240,7 @@ export default function MarketScreen() {
           return (
             <TouchableOpacity
               key={item.id}
-              onPress={() => setSelectedToken(item)}
+              onPress={() => handleSelectToken(item)}
               style={[
                 styles.coinRow,
                 {
@@ -205,13 +272,15 @@ export default function MarketScreen() {
                 </View>
               </View>
 
-              {/* Live Price */}
+              {/* Live Price in Selected Currency */}
               <View style={styles.coinPriceCol}>
                 <Text style={[styles.coinPrice, { color: colors.textPrimary }]}>
                   {formatFiat(displayPrice, currencyPreference)}
                 </Text>
                 <Text style={[styles.coinCap, { color: colors.textTertiary }]}>
-                  MCap: ${(item.marketCapUsd / 1e9).toFixed(1)}B
+                  {currencyPreference === 'INR'
+                    ? `MCap: ₹${((item.marketCapUsd * 89.2) / 1e7).toFixed(0)}Cr`
+                    : `MCap: $${(item.marketCapUsd / 1e9).toFixed(1)}B`}
                 </Text>
               </View>
 
@@ -240,24 +309,32 @@ export default function MarketScreen() {
         })}
       </ScrollView>
 
-      {/* Token Detail Quick Modal */}
+      {/* Interactive Coin Chart & Detailed Analysis Modal */}
       {selectedToken && (
         <Modal visible={!!selectedToken} transparent animationType="slide" onRequestClose={() => setSelectedToken(null)}>
           <TouchableWithoutFeedback onPress={() => setSelectedToken(null)}>
             <View style={styles.overlay}>
               <TouchableWithoutFeedback>
                 <View style={[styles.modalBox, { backgroundColor: colors.surface, borderColor: colors.borderStrong }]}>
+                  {/* Modal Header */}
                   <View style={styles.modalHeader}>
                     <View style={styles.modalTokenTitle}>
                       {selectedToken.image ? (
                         <Image source={{ uri: selectedToken.image }} style={styles.modalTokenLogo} />
                       ) : null}
                       <View>
-                        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-                          {selectedToken.name} ({selectedToken.symbol})
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                            {selectedToken.name}
+                          </Text>
+                          <View style={[styles.symbolBadge, { backgroundColor: colors.surfaceHighlight }]}>
+                            <Text style={[styles.symbolBadgeText, { color: colors.primary }]}>
+                              {selectedToken.symbol}
+                            </Text>
+                          </View>
+                        </View>
                         <Text style={[styles.modalRank, { color: colors.textSecondary }]}>
-                          Rank #{selectedToken.marketCapRank}
+                          Rank #{selectedToken.marketCapRank} • Live Verified
                         </Text>
                       </View>
                     </View>
@@ -266,86 +343,95 @@ export default function MarketScreen() {
                     </TouchableOpacity>
                   </View>
 
-                  <View style={styles.modalPriceSection}>
-                    <Text style={[styles.modalBigPrice, { color: colors.textPrimary }]}>
-                      {formatFiat(
-                        currencyPreference === 'INR' ? selectedToken.currentPriceInr : selectedToken.currentPriceUsd,
-                        currencyPreference,
-                      )}
-                    </Text>
-                    <View
-                      style={[
-                        styles.changeBadge,
-                        {
-                          backgroundColor:
-                            selectedToken.priceChangePercentage24h >= 0
-                              ? colors.successBackground
-                              : colors.dangerBackground,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.changeText,
-                          {
-                            color:
-                              selectedToken.priceChangePercentage24h >= 0
-                                ? colors.success
-                                : colors.danger,
-                          },
-                        ]}
-                      >
-                        {formatPercentage(selectedToken.priceChangePercentage24h)}
-                      </Text>
-                    </View>
-                  </View>
+                  {/* Interactive SVG Trend Chart in Currency Preference */}
+                  <PriceChart
+                    data={chartData}
+                    timeframe={chartTimeframe}
+                    onTimeframeChange={handleTimeframeChange}
+                    loading={chartLoading}
+                    currencyPreference={currencyPreference}
+                    currentPrice={
+                      currencyPreference === 'INR'
+                        ? selectedToken.currentPriceInr
+                        : selectedToken.currentPriceUsd
+                    }
+                    height={180}
+                    showTimeframeSelector={true}
+                  />
 
+                  {/* High, Low, Market Cap & Volume Grid in Currency Preference */}
                   <View style={[styles.statsGrid, { backgroundColor: colors.surfaceSubtle }]}>
                     <View style={styles.statCell}>
                       <Text style={[styles.statLabel, { color: colors.textTertiary }]}>24h High</Text>
                       <Text style={[styles.statVal, { color: colors.textPrimary }]}>
-                        ${selectedToken.high24hUsd.toLocaleString()}
+                        {formatFiat(
+                          currencyPreference === 'INR'
+                            ? selectedToken.high24hUsd * 89.2
+                            : selectedToken.high24hUsd,
+                          currencyPreference,
+                        )}
                       </Text>
                     </View>
                     <View style={styles.statCell}>
                       <Text style={[styles.statLabel, { color: colors.textTertiary }]}>24h Low</Text>
                       <Text style={[styles.statVal, { color: colors.textPrimary }]}>
-                        ${selectedToken.low24hUsd.toLocaleString()}
+                        {formatFiat(
+                          currencyPreference === 'INR'
+                            ? selectedToken.low24hUsd * 89.2
+                            : selectedToken.low24hUsd,
+                          currencyPreference,
+                        )}
                       </Text>
                     </View>
                     <View style={styles.statCell}>
                       <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Market Cap</Text>
                       <Text style={[styles.statVal, { color: colors.textPrimary }]}>
-                        ${(selectedToken.marketCapUsd / 1e9).toFixed(2)}B
+                        {currencyPreference === 'INR'
+                          ? `₹${((selectedToken.marketCapUsd * 89.2) / 1e7).toFixed(0)} Cr`
+                          : `$${(selectedToken.marketCapUsd / 1e9).toFixed(2)}B`}
                       </Text>
                     </View>
                     <View style={styles.statCell}>
                       <Text style={[styles.statLabel, { color: colors.textTertiary }]}>24h Volume</Text>
                       <Text style={[styles.statVal, { color: colors.textPrimary }]}>
-                        ${(selectedToken.totalVolumeUsd / 1e6).toFixed(1)}M
+                        {currencyPreference === 'INR'
+                          ? `₹${((selectedToken.totalVolumeUsd * 89.2) / 1e7).toFixed(0)} Cr`
+                          : `$${(selectedToken.totalVolumeUsd / 1e6).toFixed(1)}M`}
                       </Text>
                     </View>
                   </View>
 
+                  {/* Action Buttons: Buy, Sell, Swap */}
                   <View style={styles.modalActionRow}>
-                    <Button
-                      title="Buy with UPI/Card"
-                      variant="primary"
-                      onPress={() => {
-                        setSelectedToken(null);
-                        setShowBuyModal(true);
-                      }}
-                      style={styles.modalBtn}
-                    />
-                    <Button
-                      title="Trade in Swap"
-                      variant="secondary"
+                    <TouchableOpacity
+                      onPress={() => handleOpenBuyModal('buy', selectedToken.symbol)}
+                      style={[styles.modalActionBtn, { backgroundColor: colors.primary }]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="card-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.actionBtnTextWhite}>Buy</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => handleOpenBuyModal('sell', selectedToken.symbol)}
+                      style={[styles.modalActionBtn, { backgroundColor: colors.surfaceHighlight }]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="cash-outline" size={16} color={colors.textPrimary} />
+                      <Text style={[styles.actionBtnText, { color: colors.textPrimary }]}>Sell</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
                       onPress={() => {
                         setSelectedToken(null);
                         router.push('/(tabs)/swap');
                       }}
-                      style={styles.modalBtn}
-                    />
+                      style={[styles.modalActionBtn, { backgroundColor: colors.surfaceSubtle }]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
+                      <Text style={[styles.actionBtnText, { color: colors.primary }]}>Swap</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
               </TouchableWithoutFeedback>
@@ -355,7 +441,12 @@ export default function MarketScreen() {
       )}
 
       {/* Buy / Sell Gateway Modal */}
-      <BuySellModal visible={showBuyModal} onClose={() => setShowBuyModal(false)} />
+      <BuySellModal
+        visible={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        initialType={rampModalType}
+        initialCrypto={rampModalCrypto}
+      />
     </ScreenWrapper>
   );
 }
@@ -364,6 +455,15 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.xxl,
+  },
+  currencyPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: RADIUS.full,
+  },
+  currencyPillText: {
+    ...TYPOGRAPHY.captionBold,
+    fontSize: 11,
   },
   searchWrapper: {
     marginTop: SPACING.xs,
@@ -408,7 +508,7 @@ const styles = StyleSheet.create({
   },
   colHeaderPrice: {
     ...TYPOGRAPHY.captionBold,
-    width: 100,
+    width: 115,
     textAlign: 'right',
   },
   colHeaderChange: {
@@ -464,7 +564,7 @@ const styles = StyleSheet.create({
   },
   coinPriceCol: {
     alignItems: 'flex-end',
-    width: 95,
+    width: 110,
     marginRight: SPACING.sm,
   },
   coinPrice: {
@@ -501,13 +601,13 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: RADIUS.xl,
     borderTopRightRadius: RADIUS.xl,
     borderWidth: 1,
-    padding: SPACING.xl,
+    padding: SPACING.lg,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.xs,
   },
   modalTokenTitle: {
     flexDirection: 'row',
@@ -522,45 +622,61 @@ const styles = StyleSheet.create({
   modalTitle: {
     ...TYPOGRAPHY.h3,
   },
+  symbolBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.xs,
+  },
+  symbolBadgeText: {
+    ...TYPOGRAPHY.captionBold,
+    fontSize: 10,
+  },
   modalRank: {
     ...TYPOGRAPHY.caption,
-    marginTop: 2,
-  },
-  modalPriceSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginVertical: SPACING.md,
-  },
-  modalBigPrice: {
-    ...TYPOGRAPHY.h1,
-    fontSize: 28,
+    marginTop: 1,
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     borderRadius: RADIUS.md,
     padding: SPACING.md,
-    marginVertical: SPACING.md,
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.md,
   },
   statCell: {
     width: '50%',
-    paddingVertical: SPACING.xs,
+    paddingVertical: 3,
   },
   statLabel: {
     ...TYPOGRAPHY.caption,
+    fontSize: 11,
   },
   statVal: {
     ...TYPOGRAPHY.bodyBold,
-    marginTop: 2,
+    marginTop: 1,
+    fontSize: 13,
   },
   modalActionRow: {
     flexDirection: 'row',
-    gap: SPACING.md,
-    marginTop: SPACING.md,
-    marginBottom: SPACING.lg,
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
   },
-  modalBtn: {
+  modalActionBtn: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.md,
+  },
+  actionBtnTextWhite: {
+    ...TYPOGRAPHY.bodyBold,
+    color: '#FFFFFF',
+    fontSize: 14,
+  },
+  actionBtnText: {
+    ...TYPOGRAPHY.bodyBold,
+    fontSize: 14,
   },
 });

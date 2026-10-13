@@ -36,6 +36,36 @@ function shortenAddress(addr, start = 6, end = 4) {
   return `${addr.slice(0, start)}...${addr.slice(-end)}`;
 }
 
+function formatFiat(amount, currency = 'USD', showSymbol = true) {
+  if (isNaN(amount) || !isFinite(amount)) return currency === 'USD' ? '$0.00' : '₹0.00';
+  const isNeg = amount < 0;
+  const absAmount = Math.abs(amount);
+  const symbol = showSymbol ? (currency === 'INR' ? '₹' : '$') : '';
+
+  if (currency === 'INR') {
+    if (absAmount > 0 && absAmount < 0.01) {
+      return `${isNeg ? '-' : ''}${symbol}${absAmount.toFixed(4)}`;
+    }
+    const parts = absAmount.toFixed(2).split('.');
+    let intPart = parts[0];
+    const decPart = parts[1];
+    let lastThree = intPart.slice(-3);
+    const otherNumbers = intPart.slice(0, -3);
+    if (otherNumbers !== '') {
+      lastThree = ',' + lastThree;
+    }
+    const formattedInt = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
+    return `${isNeg ? '-' : ''}${symbol}${formattedInt}.${decPart}`;
+  }
+
+  if (absAmount > 0 && absAmount < 0.01) {
+    return `${isNeg ? '-' : ''}${symbol}${absAmount.toFixed(4)}`;
+  }
+  const parts = absAmount.toFixed(2).split('.');
+  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${isNeg ? '-' : ''}${symbol}${intPart}.${parts[1]}`;
+}
+
 test('formatTokenBalance formats 18 decimals native ETH correctly', () => {
   const oneEth = 1000000000000000000n; // 1 ETH
   assert.equal(formatTokenBalance(oneEth, 18), '1');
@@ -66,4 +96,12 @@ test('shortenAddress shortens Ethereum addresses correctly', () => {
   const addr = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
   assert.equal(shortenAddress(addr), '0x1c7D...7238');
   assert.equal(shortenAddress(''), '');
+});
+
+test('formatFiat formats INR in Indian Lakhs/Crores numbering and USD correctly', () => {
+  assert.equal(formatFiat(7354540, 'INR'), '₹73,54,540.00');
+  assert.equal(formatFiat(239056, 'INR'), '₹2,39,056.00');
+  assert.equal(formatFiat(89.2, 'INR'), '₹89.20');
+  assert.equal(formatFiat(82450, 'USD'), '$82,450.00');
+  assert.equal(formatFiat(2680, 'USD'), '$2,680.00');
 });

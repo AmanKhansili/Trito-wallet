@@ -52,7 +52,8 @@ export function parseTokenAmount(amountStr: string, decimals: number): bigint {
 }
 
 /**
- * Format fiat currency (USD or INR).
+ * Format fiat currency (USD or INR) with accurate localized grouping.
+ * Handles Indian numbering system (Lakhs / Crores) correctly across all devices & Hermes engines.
  */
 export function formatFiat(
   amount: number,
@@ -63,23 +64,37 @@ export function formatFiat(
     return currency === 'USD' ? '$0.00' : '₹0.00';
   }
 
+  const isNeg = amount < 0;
+  const absAmount = Math.abs(amount);
+  const symbol = showSymbol ? (currency === 'INR' ? '₹' : '$') : '';
+
   if (currency === 'INR') {
-    const formatted = new Intl.NumberFormat('en-IN', {
-      style: showSymbol ? 'currency' : 'decimal',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-    return formatted;
+    // Very small tokens (e.g. Shiba Inu, PEPE, micro-caps)
+    if (absAmount > 0 && absAmount < 0.01) {
+      return `${isNeg ? '-' : ''}${symbol}${absAmount.toFixed(4)}`;
+    }
+
+    const parts = absAmount.toFixed(2).split('.');
+    let intPart = parts[0];
+    const decPart = parts[1];
+
+    let lastThree = intPart.slice(-3);
+    const otherNumbers = intPart.slice(0, -3);
+    if (otherNumbers !== '') {
+      lastThree = ',' + lastThree;
+    }
+    const formattedInt = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
+    return `${isNeg ? '-' : ''}${symbol}${formattedInt}.${decPart}`;
   }
 
-  const formatted = new Intl.NumberFormat('en-US', {
-    style: showSymbol ? 'currency' : 'decimal',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-  return formatted;
+  // USD standard Western thousands grouping
+  if (absAmount > 0 && absAmount < 0.01) {
+    return `${isNeg ? '-' : ''}${symbol}${absAmount.toFixed(4)}`;
+  }
+
+  const parts = absAmount.toFixed(2).split('.');
+  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${isNeg ? '-' : ''}${symbol}${intPart}.${parts[1]}`;
 }
 
 /**

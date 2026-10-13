@@ -4,24 +4,30 @@ import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, TYPOGRAPHY, RADIUS } from '../constants/theme';
 import { formatFiat } from '../utils/formatters';
-import { CurrencyPreference } from '../types';
+import { CurrencyPreference, Timeframe } from '../types';
 
 export type TimeframeOption = '1D' | '1W' | '1M' | '1Y';
 
-interface PriceChartProps {
+export interface PriceChartProps {
   data: number[];
-  timeframe: TimeframeOption;
-  onTimeframeChange: (tf: TimeframeOption) => void;
-  currencyPreference: CurrencyPreference;
+  timeframe: Timeframe;
+  onTimeframeChange: (tf: Timeframe) => void;
+  loading?: boolean; // <-- Ye line add karein
+  currencyPreference?: CurrencyPreference;
+  currentPrice?: number;
   height?: number;
+  showTimeframeSelector?: boolean;
 }
 
 export const PriceChart: React.FC<PriceChartProps> = ({
   data,
   timeframe,
   onTimeframeChange,
-  currencyPreference,
-  height = 170,
+  loading = false, // <-- Yahan loading add kar lein
+  currencyPreference = 'USD',
+  currentPrice,
+  height = 190,
+  showTimeframeSelector = true,
 }) => {
   const { colors } = useTheme();
   const screenWidth = Dimensions.get('window').width - 48;
