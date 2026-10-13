@@ -10,16 +10,21 @@ import React, {
 import {
   NetworkConfig,
   NetworkId,
+  TokenConfig,
   TokenBalance,
   TransactionRecord,
   CurrencyPreference,
   MarketPricesMap,
+  AddressBookContact,
+  WalletAccount,
+  GasSpeedTier,
 } from '../types';
 import { NETWORKS, getNetwork } from '../config/networks';
 import { cryptoService } from '../services/cryptoService';
 import { priceService } from '../services/priceService';
 import { storageService } from '../services/storageService';
 import { walletService } from '../services/walletService';
+import { tokenService } from '../services/tokenService';
 import { useAuth } from './AuthContext';
 import { logger } from '../utils/logger';
 
@@ -41,6 +46,26 @@ interface WalletContextType {
   refreshBalances: (silent?: boolean) => Promise<void>;
   refreshTransactions: () => Promise<void>;
   addTransaction: (tx: TransactionRecord) => Promise<void>;
+
+  // Custom Tokens
+  customTokens: TokenConfig[];
+  addCustomToken: (token: TokenConfig) => Promise<void>;
+  removeCustomToken: (contractAddress: string) => Promise<void>;
+
+  // Address Book
+  contacts: AddressBookContact[];
+  addContact: (contact: AddressBookContact) => Promise<void>;
+  deleteContact: (id: string) => Promise<void>;
+
+  // Multi-Account
+  accounts: WalletAccount[];
+  activeAccountIndex: number;
+  switchAccount: (index: number) => Promise<void>;
+  createNewAccount: () => Promise<WalletAccount>;
+
+  // Gas Controls
+  gasSpeed: GasSpeedTier;
+  setGasSpeed: (tier: GasSpeedTier) => void;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -61,7 +86,13 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
 
-  // In-flight fetch lock (Infinite loop prevention)
+  // Advanced features state
+  const [customTokens, setCustomTokens] = useState<TokenConfig[]>([]);
+  const [contacts, setContacts] = useState<AddressBookContact[]>([]);
+  const [accounts, setAccounts] = useState<WalletAccount[]>([]);
+  const [activeAccountIndex, setActiveAccountIndex] = useState<number>(0);
+  const [gasSpeed, setGasSpeed] = useState<GasSpeedTier>('standard');
+
   const isFetchingRef = useRef<boolean>(false);
 
   // Load preferences from storage on mount
@@ -74,12 +105,18 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const storedTxs = await storageService.getTransactions();
         const storedAddress = await storageService.getStoredPublicAddress();
         const initialPrices = await priceService.fetchMarketPrices(false);
+        const storedTokens = await storageService.getCustomTokens();
+        const storedContacts = await storageService.getContacts();
+        const activeIdx = await storageService.getActiveAccountIndex();
 
         if (isMounted) {
           setNetworkState(getNetwork(storedNetworkId));
           setCurrencyPreferenceState(storedCurr);
           setTransactions(storedTxs);
           setMarketPrices(initialPrices);
+          setCustomTokens(storedTokens);
+          setContacts(storedContacts);
+          setActiveAccountIndex(activeIdx);
           if (storedAddress) {
             setAddress(storedAddress);
           }
@@ -95,20 +132,25 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   }, []);
 
-  // Update address when auth state changes
+  // Update address and accounts list when auth state changes
   useEffect(() => {
     let isMounted = true;
     async function syncAddress() {
       if (hasWallet) {
         const currentAddr = await walletService.getAddress();
+        const accountList = await walletService.listAccounts();
+        const activeIdx = await storageService.getActiveAccountIndex();
         if (isMounted) {
           setAddress(currentAddr);
+          setAccounts(accountList);
+          setActiveAccountIndex(activeIdx);
         }
       } else {
         if (isMounted) {
           setAddress(null);
           setEthBalance(null);
           setTokenBalances([]);
+          setAccounts([]);
           setTotalPortfolioValueUsd(0);
           setTotalPortfolioValueInr(0);
         }
@@ -124,7 +166,6 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Fetch balances from blockchain RPC
   const refreshBalances = useCallback(
     async (silent: boolean = false) => {
-      // Prevent overlapping calls
       if (isFetchingRef.current) {
         return;
       }
@@ -142,13 +183,8 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setNetworkError(null);
 
       try {
-        let prices = marketPrices;
-        try {
-          prices = await priceService.fetchMarketPrices(silent);
-          setMarketPrices(prices);
-        } catch (priceErr) {
-          logger.warn("Price fetch encountered issue, using cached prices:", priceErr);
-        }
+        const prices = await priceService.fetchMarketPrices(silent);
+        setMarketPrices(prices);
 
         const { ethBalance: ethBal, tokenBalances: tBalances } =
           await cryptoService.getAllBalances(activeAddr, network.id, prices);
@@ -177,15 +213,12 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     [network.id],
   );
 
-  // Auto-refresh balances strictly when address or network ID changes
   useEffect(() => {
     if (address) {
       refreshBalances(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, network.id]);
+  }, [address, network.id, refreshBalances]);
 
-  // Refresh transaction history from storage
   const refreshTransactions = useCallback(async () => {
     const txs = await storageService.getTransactions();
     setTransactions(txs);
@@ -212,6 +245,65 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setCurrencyPreferenceState(curr);
   }, []);
 
+  // Custom Token Actions
+  const addCustomToken = useCallback(
+    async (token: TokenConfig) => {
+      await tokenService.importToken(token);
+      const updated = await storageService.getCustomTokens();
+      setCustomTokens(updated);
+      refreshBalances(true);
+    },
+    [refreshBalances],
+  );
+
+  const removeCustomToken = useCallback(
+    async (contractAddress: string) => {
+      await tokenService.removeCustomToken(contractAddress, network.id);
+      const updated = await storageService.getCustomTokens();
+      setCustomTokens(updated);
+      refreshBalances(true);
+    },
+    [network.id, refreshBalances],
+  );
+
+  // Address Book Actions
+  const addContact = useCallback(async (contact: AddressBookContact) => {
+    await storageService.saveContact(contact);
+    const updated = await storageService.getContacts();
+    setContacts(updated);
+  }, []);
+
+  const deleteContact = useCallback(async (id: string) => {
+    await storageService.deleteContact(id);
+    const updated = await storageService.getContacts();
+    setContacts(updated);
+  }, []);
+
+  // Multi-Account Actions
+  const switchAccount = useCallback(
+    async (index: number) => {
+      await walletService.switchAccount(index);
+      const newAddr = await walletService.getAddress();
+      const updatedAccounts = await walletService.listAccounts();
+      setActiveAccountIndex(index);
+      setAddress(newAddr);
+      setAccounts(updatedAccounts);
+      refreshBalances(false);
+    },
+    [refreshBalances],
+  );
+
+  const createNewAccount = useCallback(async (): Promise<WalletAccount> => {
+    const newAcc = await walletService.createNewAccount();
+    const updatedAccounts = await walletService.listAccounts();
+    const newIdx = newAcc.index;
+    setActiveAccountIndex(newIdx);
+    setAddress(newAcc.address);
+    setAccounts(updatedAccounts);
+    refreshBalances(false);
+    return newAcc;
+  }, [refreshBalances]);
+
   return (
     <WalletContext.Provider
       value={{
@@ -232,6 +324,18 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         refreshBalances,
         refreshTransactions,
         addTransaction,
+        customTokens,
+        addCustomToken,
+        removeCustomToken,
+        contacts,
+        addContact,
+        deleteContact,
+        accounts,
+        activeAccountIndex,
+        switchAccount,
+        createNewAccount,
+        gasSpeed,
+        setGasSpeed,
       }}
     >
       {children}

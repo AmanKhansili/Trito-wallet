@@ -51,7 +51,7 @@ async function callZeroX(endpoint: 'price' | 'quote', params: Record<string, str
   if (!apiKey) {
     throw new Error('0x API key missing. Add EXPO_PUBLIC_ZEROX_API_KEY to .env and restart Expo with -c.');
   }
-  const qs = new URLSearchParams(params).toString();
+  const qs = Object.entries(params).filter(([_, v]) => v != null && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&");
   const res = await fetch(`${ZEROX_BASE_URL}/${endpoint}?${qs}`, {
     headers: { '0x-api-key': apiKey, '0x-version': 'v2', Accept: 'application/json' },
   });

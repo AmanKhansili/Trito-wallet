@@ -14,8 +14,8 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.tabBarBackground,
           borderTopColor: colors.border,
-          height: 75,
-          paddingBottom: 25,
+          height: 64,
+          paddingBottom: 8,
           paddingTop: 8,
         },
         tabBarActiveTintColor: colors.primary,
@@ -26,6 +26,7 @@ export default function TabLayout() {
         },
       }}
     >
+      {/* Tab 1: Wallet (Home / Portfolio) */}
       <Tabs.Screen
         name="index"
         options={{
@@ -35,6 +36,19 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      {/* Tab 2: Markets (CoinGecko Live Prices & Trends) */}
+      <Tabs.Screen
+        name="market"
+        options={{
+          title: 'Markets',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="stats-chart-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      {/* Tab 3: Swap (DEX Trading) */}
       <Tabs.Screen
         name="swap"
         options={{
@@ -44,15 +58,8 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="market"
-        options={{
-          title: 'Market',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="trending-up-outline" size={size} color={color} />
-          ),
-        }}
-      />
+
+      {/* Tab 4: Settings (Security, Accounts, Contacts) */}
       <Tabs.Screen
         name="settings"
         options={{
@@ -63,6 +70,7 @@ export default function TabLayout() {
         }}
       />
 
+      {/* Hidden from Tab Bar (Accessed directly from Wallet quick action buttons) */}
       <Tabs.Screen
         name="send"
         options={{

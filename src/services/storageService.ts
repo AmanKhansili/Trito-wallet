@@ -1,6 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CurrencyPreference, NetworkId, TransactionRecord, MarketPricesMap, TransakOrderRecord } from '../types';
+import {
+  CurrencyPreference,
+  NetworkId,
+  TransactionRecord,
+  MarketPricesMap,
+  TokenConfig,
+  AddressBookContact,
+} from '../types';
 import { logger } from '../utils/logger';
 
 // SecureStore Keys (Encrypted on Device Keychain / KeyStore)
@@ -20,7 +27,10 @@ const STORAGE_AUTOLOCK_MINUTES = 'trito_autolock_minutes';
 const STORAGE_LAST_ACTIVE = 'trito_last_active_timestamp';
 const STORAGE_TRANSACTIONS = 'trito_transaction_history';
 const STORAGE_CACHED_PRICES = 'trito_cached_prices';
-const STORAGE_TRANSAK_ORDERS = 'trito_transak_orders';
+const STORAGE_CUSTOM_TOKENS = 'trito_custom_tokens';
+const STORAGE_ADDRESS_BOOK = 'trito_address_book';
+const STORAGE_ACTIVE_ACCOUNT_INDEX = 'trito_active_account_index';
+const STORAGE_ACCOUNTS_COUNT = 'trito_accounts_count';
 
 export const storageService = {
   // ==================== SECURE DATA ====================
@@ -86,7 +96,7 @@ export const storageService = {
     }
 
     const stored = await SecureStore.getItemAsync(SECURE_USER_PIN);
-    const ok = !!stored && stored === input; // baad me hashed compare
+    const ok = !!stored && stored === input;
 
     const next = ok
       ? { count: 0, lockedUntil: 0 }
@@ -269,17 +279,11 @@ export const storageService = {
     }
   },
 
-  async saveTransakOrders(orders: TransakOrderRecord[]): Promise<void> {
-    try {
-      await AsyncStorage.setItem(STORAGE_TRANSAK_ORDERS, JSON.stringify(orders));
-    } catch (err) {
-      logger.error('Failed to save Transak orders:', err);
-    }
-  },
+  // ==================== CUSTOM TOKENS ====================
 
-  async getTransakOrders(): Promise<TransakOrderRecord[]> {
+  async getCustomTokens(): Promise<TokenConfig[]> {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_TRANSAK_ORDERS);
+      const data = await AsyncStorage.getItem(STORAGE_CUSTOM_TOKENS);
       if (!data) return [];
       return JSON.parse(data);
     } catch {
@@ -287,13 +291,97 @@ export const storageService = {
     }
   },
 
-  async addTransakOrder(order: TransakOrderRecord): Promise<void> {
+  async saveCustomTokens(tokens: TokenConfig[]): Promise<void> {
     try {
-      const existing = await this.getTransakOrders();
-      const updated = [order, ...existing.filter((o) => o.orderId !== order.orderId)];
-      await this.saveTransakOrders(updated);
+      await AsyncStorage.setItem(STORAGE_CUSTOM_TOKENS, JSON.stringify(tokens));
     } catch (err) {
-      logger.error('Failed to add Transak order:', err);
+      logger.error('Failed to save custom tokens:', err);
+    }
+  },
+
+  async addCustomToken(token: TokenConfig): Promise<void> {
+    const existing = await this.getCustomTokens();
+    const filtered = existing.filter(
+      (t) =>
+        !(
+          t.network === token.network &&
+          t.contractAddress?.toLowerCase() === token.contractAddress?.toLowerCase()
+        ),
+    );
+    await this.saveCustomTokens([...filtered, { ...token, isCustom: true }]);
+  },
+
+  async removeCustomToken(contractAddress: string, networkId: NetworkId): Promise<void> {
+    const existing = await this.getCustomTokens();
+    const updated = existing.filter(
+      (t) =>
+        !(
+          t.network === networkId &&
+          t.contractAddress?.toLowerCase() === contractAddress.toLowerCase()
+        ),
+    );
+    await this.saveCustomTokens(updated);
+  },
+
+  // ==================== ADDRESS BOOK ====================
+
+  async getContacts(): Promise<AddressBookContact[]> {
+    try {
+      const data = await AsyncStorage.getItem(STORAGE_ADDRESS_BOOK);
+      if (!data) return [];
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  },
+
+  async saveContact(contact: AddressBookContact): Promise<void> {
+    const existing = await this.getContacts();
+    const filtered = existing.filter((c) => c.id !== contact.id);
+    await AsyncStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify([contact, ...filtered]));
+  },
+
+  async deleteContact(id: string): Promise<void> {
+    const existing = await this.getContacts();
+    const filtered = existing.filter((c) => c.id !== id);
+    await AsyncStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(filtered));
+  },
+
+  // ==================== MULTI-ACCOUNT DERIVATION ====================
+
+  async getActiveAccountIndex(): Promise<number> {
+    try {
+      const val = await AsyncStorage.getItem(STORAGE_ACTIVE_ACCOUNT_INDEX);
+      const parsed = Number(val);
+      return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    } catch {
+      return 0;
+    }
+  },
+
+  async saveActiveAccountIndex(index: number): Promise<void> {
+    try {
+      await AsyncStorage.setItem(STORAGE_ACTIVE_ACCOUNT_INDEX, String(index));
+    } catch (err) {
+      logger.error('Failed to save active account index:', err);
+    }
+  },
+
+  async getAccountsCount(): Promise<number> {
+    try {
+      const val = await AsyncStorage.getItem(STORAGE_ACCOUNTS_COUNT);
+      const parsed = Number(val);
+      return isNaN(parsed) || parsed < 1 ? 1 : parsed;
+    } catch {
+      return 1;
+    }
+  },
+
+  async saveAccountsCount(count: number): Promise<void> {
+    try {
+      await AsyncStorage.setItem(STORAGE_ACCOUNTS_COUNT, String(count));
+    } catch (err) {
+      logger.error('Failed to save accounts count:', err);
     }
   },
 
@@ -306,13 +394,17 @@ export const storageService = {
       await SecureStore.deleteItemAsync(SECURE_MNEMONIC);
       await SecureStore.deleteItemAsync(SECURE_USER_PIN);
       await SecureStore.deleteItemAsync(SECURE_BIOMETRICS);
+      await SecureStore.deleteItemAsync(SECURE_PIN_ATTEMPTS);
 
       await AsyncStorage.multiRemove([
         STORAGE_WALLET_EXISTS,
         STORAGE_PUBLIC_ADDRESS,
         STORAGE_LAST_ACTIVE,
         STORAGE_TRANSACTIONS,
-        STORAGE_TRANSAK_ORDERS,
+        STORAGE_CUSTOM_TOKENS,
+        STORAGE_ADDRESS_BOOK,
+        STORAGE_ACTIVE_ACCOUNT_INDEX,
+        STORAGE_ACCOUNTS_COUNT,
       ]);
       logger.info('Wallet data completely erased from device storage.');
     } catch (err) {

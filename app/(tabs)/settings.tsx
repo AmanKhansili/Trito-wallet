@@ -15,6 +15,9 @@ import { ScreenWrapper } from '../../src/components/ScreenWrapper';
 import { Header } from '../../src/components/Header';
 import { ConfirmModal } from '../../src/components/ConfirmModal';
 import { Toast } from '../../src/components/Toast';
+import { AccountSelectorModal } from '../../src/components/AccountSelectorModal';
+import { AddressBookModal } from '../../src/components/AddressBookModal';
+import { BuySellModal } from '../../src/components/BuySellModal';
 import { useWallet } from '../../src/context/WalletContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -24,7 +27,16 @@ import { NetworkId } from '../../src/types';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { address, network, setNetwork, currencyPreference, setCurrencyPreference } = useWallet();
+  const {
+    address,
+    network,
+    setNetwork,
+    currencyPreference,
+    setCurrencyPreference,
+    activeAccountIndex,
+    accounts,
+    contacts,
+  } = useWallet();
   const {
     lockWallet,
     removeWallet,
@@ -39,6 +51,9 @@ export default function SettingsScreen() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showNetworkModal, setShowNetworkModal] = useState<boolean>(false);
   const [showWipeModal, setShowWipeModal] = useState<boolean>(false);
+  const [showAccountsModal, setShowAccountsModal] = useState<boolean>(false);
+  const [showAddressBookModal, setShowAddressBookModal] = useState<boolean>(false);
+  const [showBuySellModal, setShowBuySellModal] = useState<boolean>(false);
   const [isWiping, setIsWiping] = useState<boolean>(false);
 
   const handleCopy = async () => {
@@ -85,7 +100,7 @@ export default function SettingsScreen() {
               <Ionicons name="wallet-outline" size={24} color={colors.primary} />
               <View style={styles.cardInfo}>
                 <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
-                  Active Address
+                  Account {activeAccountIndex + 1}
                 </Text>
                 <Text style={[styles.cardSub, { color: colors.textSecondary }]}>
                   {shortenAddress(address || '', 8, 6)}
@@ -93,6 +108,84 @@ export default function SettingsScreen() {
               </View>
             </View>
             <Ionicons name="copy-outline" size={18} color={colors.textSecondary} />
+          </View>
+        </TouchableOpacity>
+
+        {/* ================= WALLET & ACCOUNTS ================= */}
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>ACCOUNTS & CONTACTS</Text>
+
+        {/* Manage Accounts */}
+        <TouchableOpacity
+          onPress={() => setShowAccountsModal(true)}
+          style={[
+            styles.card,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+          activeOpacity={0.7}
+        >
+          <View style={styles.cardRow}>
+            <View style={styles.cardLeft}>
+              <Ionicons name="people-circle-outline" size={22} color={colors.primary} />
+              <View style={styles.cardInfo}>
+                <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
+                  Manage Accounts
+                </Text>
+                <Text style={[styles.cardSub, { color: colors.textSecondary }]}>
+                  {accounts.length} active derived {accounts.length === 1 ? 'account' : 'accounts'} (BIP-44)
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </View>
+        </TouchableOpacity>
+
+        {/* Address Book */}
+        <TouchableOpacity
+          onPress={() => setShowAddressBookModal(true)}
+          style={[
+            styles.card,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+          activeOpacity={0.7}
+        >
+          <View style={styles.cardRow}>
+            <View style={styles.cardLeft}>
+              <Ionicons name="book-outline" size={22} color={colors.accent} />
+              <View style={styles.cardInfo}>
+                <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
+                  Address Book
+                </Text>
+                <Text style={[styles.cardSub, { color: colors.textSecondary }]}>
+                  {contacts.length} saved {contacts.length === 1 ? 'contact' : 'contacts'}
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </View>
+        </TouchableOpacity>
+
+        {/* Fiat Buy & Sell Gateways */}
+        <TouchableOpacity
+          onPress={() => setShowBuySellModal(true)}
+          style={[
+            styles.card,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+          activeOpacity={0.7}
+        >
+          <View style={styles.cardRow}>
+            <View style={styles.cardLeft}>
+              <Ionicons name="card-outline" size={22} color={colors.success} />
+              <View style={styles.cardInfo}>
+                <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
+                  Buy & Sell Crypto
+                </Text>
+                <Text style={[styles.cardSub, { color: colors.textSecondary }]}>
+                  Onramp.money (UPI / IMPS) & Transak (Cards)
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
           </View>
         </TouchableOpacity>
 
@@ -412,6 +505,24 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
       </ConfirmModal>
+
+      {/* Accounts Modal */}
+      <AccountSelectorModal
+        visible={showAccountsModal}
+        onClose={() => setShowAccountsModal(false)}
+      />
+
+      {/* Address Book Modal */}
+      <AddressBookModal
+        visible={showAddressBookModal}
+        onClose={() => setShowAddressBookModal(false)}
+      />
+
+      {/* Buy & Sell Modal */}
+      <BuySellModal
+        visible={showBuySellModal}
+        onClose={() => setShowBuySellModal(false)}
+      />
 
       {/* Remove Wallet Confirmation Modal */}
       <ConfirmModal

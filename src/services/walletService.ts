@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { storageService } from './storageService';
 import { validateMnemonic, validatePrivateKey } from '../utils/validation';
+import { WalletAccount } from '../types';
 import { logger } from '../utils/logger';
 
 export interface GeneratedWalletData {
@@ -20,6 +21,7 @@ export interface ImportedWalletData {
 // In-memory decrypted key storage (ephemeral, cleared on lock)
 let memoryPrivateKey: string | null = null;
 let memoryAddress: string | null = null;
+let memoryMnemonic: string | null = null;
 
 export const walletService = {
   /**
@@ -27,7 +29,6 @@ export const walletService = {
    * Derivation path follows standard BIP-44: m/44'/60'/0'/0/0
    */
   generateNewWallet(): GeneratedWalletData {
-    // 16 bytes of entropy yields a 12-word BIP-39 mnemonic
     const entropy = ethers.randomBytes(16);
     const mnemonic = ethers.Mnemonic.fromEntropy(entropy);
     const hdNode = ethers.HDNodeWallet.fromMnemonic(mnemonic, "m/44'/60'/0'/0/0");
@@ -57,9 +58,12 @@ export const walletService = {
     await storageService.saveSecureWallet(privateKey, mnemonicPhrase);
     await storageService.savePin(pin);
     await storageService.setWalletExists(true, address);
+    await storageService.saveActiveAccountIndex(0);
+    await storageService.saveAccountsCount(1);
 
     memoryPrivateKey = privateKey;
     memoryAddress = address;
+    memoryMnemonic = mnemonicPhrase;
     await storageService.saveLastActiveTimestamp(Date.now());
 
     logger.info('Wallet finalized and saved to secure storage.');
@@ -74,10 +78,8 @@ export const walletService = {
     }
 
     const trimmed = secretInput.trim();
-    // Collapse any whitespace/newlines into single spaces and lowercase (seed phrases only)
     const normalized = trimmed.toLowerCase().split(/\s+/).join(' ');
 
-    // Check if it's a seed phrase
     if (normalized.includes(' ')) {
       const val = validateMnemonic(normalized);
       if (!val.isValid) {
@@ -90,9 +92,12 @@ export const walletService = {
       await storageService.saveSecureWallet(hdNode.privateKey, mnemonic.phrase);
       await storageService.savePin(pin);
       await storageService.setWalletExists(true, hdNode.address);
+      await storageService.saveActiveAccountIndex(0);
+      await storageService.saveAccountsCount(1);
 
       memoryPrivateKey = hdNode.privateKey;
       memoryAddress = hdNode.address;
+      memoryMnemonic = mnemonic.phrase;
       await storageService.saveLastActiveTimestamp(Date.now());
 
       logger.info('Wallet imported via seed phrase successfully.');
@@ -102,7 +107,6 @@ export const walletService = {
         mnemonicPhrase: mnemonic.phrase,
       };
     } else {
-      // Must be a raw private key
       const val = validatePrivateKey(trimmed);
       if (!val.isValid) {
         throw new Error(val.error || 'Invalid private key format.');
@@ -114,9 +118,12 @@ export const walletService = {
       await storageService.saveSecureWallet(cleanKey);
       await storageService.savePin(pin);
       await storageService.setWalletExists(true, wallet.address);
+      await storageService.saveActiveAccountIndex(0);
+      await storageService.saveAccountsCount(1);
 
       memoryPrivateKey = cleanKey;
       memoryAddress = wallet.address;
+      memoryMnemonic = null;
       await storageService.saveLastActiveTimestamp(Date.now());
 
       logger.info('Wallet imported via private key successfully.');
@@ -129,7 +136,6 @@ export const walletService = {
 
   /**
    * Authenticate and unlock wallet with PIN.
-   * May throw if the PIN is temporarily locked after too many wrong attempts.
    */
   async unlockWithPin(pin: string): Promise<boolean> {
     const isValid = await storageService.verifyPin(pin);
@@ -137,23 +143,35 @@ export const walletService = {
       return false;
     }
 
+    const mnemonic = await storageService.getSecureMnemonic();
     const privateKey = await storageService.getSecurePrivateKey();
-    if (!privateKey) {
-      throw new Error('Wallet private key missing from secure storage.');
+
+    if (!privateKey && !mnemonic) {
+      throw new Error('Wallet credentials missing from secure storage.');
     }
 
-    const wallet = new ethers.Wallet(privateKey);
-    memoryPrivateKey = privateKey;
-    memoryAddress = wallet.address;
-    await storageService.saveLastActiveTimestamp(Date.now());
+    const activeIndex = await storageService.getActiveAccountIndex();
 
+    if (mnemonic) {
+      const mObj = ethers.Mnemonic.fromPhrase(mnemonic);
+      const hdNode = ethers.HDNodeWallet.fromMnemonic(mObj, `m/44'/60'/0'/0/${activeIndex}`);
+      memoryPrivateKey = hdNode.privateKey;
+      memoryAddress = hdNode.address;
+      memoryMnemonic = mnemonic;
+    } else if (privateKey) {
+      const wallet = new ethers.Wallet(privateKey);
+      memoryPrivateKey = privateKey;
+      memoryAddress = wallet.address;
+      memoryMnemonic = null;
+    }
+
+    await storageService.saveLastActiveTimestamp(Date.now());
     logger.info('Wallet unlocked successfully.');
     return true;
   },
 
   /**
-   * Unlock with biometrics. The biometric prompt is shown here, inside the service,
-   * so no caller can unlock the wallet without a successful biometric check.
+   * Unlock with biometrics.
    */
   async unlockWithBiometrics(): Promise<boolean> {
     if (!(await storageService.isBiometricsEnabled())) {
@@ -176,18 +194,97 @@ export const walletService = {
       return false;
     }
 
+    const mnemonic = await storageService.getSecureMnemonic();
     const privateKey = await storageService.getSecurePrivateKey();
-    if (!privateKey) {
+    const activeIndex = await storageService.getActiveAccountIndex();
+
+    if (mnemonic) {
+      const mObj = ethers.Mnemonic.fromPhrase(mnemonic);
+      const hdNode = ethers.HDNodeWallet.fromMnemonic(mObj, `m/44'/60'/0'/0/${activeIndex}`);
+      memoryPrivateKey = hdNode.privateKey;
+      memoryAddress = hdNode.address;
+      memoryMnemonic = mnemonic;
+    } else if (privateKey) {
+      const wallet = new ethers.Wallet(privateKey);
+      memoryPrivateKey = privateKey;
+      memoryAddress = wallet.address;
+      memoryMnemonic = null;
+    } else {
       return false;
     }
 
-    const wallet = new ethers.Wallet(privateKey);
-    memoryPrivateKey = privateKey;
-    memoryAddress = wallet.address;
     await storageService.saveLastActiveTimestamp(Date.now());
-
     logger.info('Wallet unlocked via biometrics.');
     return true;
+  },
+
+  /**
+   * Multi-Account HD Derivation: Lists all derived accounts under this wallet.
+   */
+  async listAccounts(): Promise<WalletAccount[]> {
+    const mnemonic = memoryMnemonic || (await storageService.getSecureMnemonic());
+    if (!mnemonic) {
+      const addr = await this.getAddress();
+      return [{ index: 0, name: 'Account 1', address: addr || '' }];
+    }
+
+    const count = await storageService.getAccountsCount();
+    const accounts: WalletAccount[] = [];
+    const mObj = ethers.Mnemonic.fromPhrase(mnemonic);
+
+    for (let i = 0; i < count; i++) {
+      const hdNode = ethers.HDNodeWallet.fromMnemonic(mObj, `m/44'/60'/0'/0/${i}`);
+      accounts.push({
+        index: i,
+        name: `Account ${i + 1}`,
+        address: hdNode.address,
+      });
+    }
+
+    return accounts;
+  },
+
+  /**
+   * Adds a new HD derived account (e.g. Account 2, Account 3).
+   */
+  async createNewAccount(): Promise<WalletAccount> {
+    const mnemonic = memoryMnemonic || (await storageService.getSecureMnemonic());
+    if (!mnemonic) {
+      throw new Error('Cannot add new accounts to a wallet imported via private key.');
+    }
+
+    const currentCount = await storageService.getAccountsCount();
+    const newIndex = currentCount;
+    await storageService.saveAccountsCount(currentCount + 1);
+
+    const mObj = ethers.Mnemonic.fromPhrase(mnemonic);
+    const hdNode = ethers.HDNodeWallet.fromMnemonic(mObj, `m/44'/60'/0'/0/${newIndex}`);
+
+    const newAccount: WalletAccount = {
+      index: newIndex,
+      name: `Account ${newIndex + 1}`,
+      address: hdNode.address,
+    };
+
+    // Switch to new account automatically
+    await this.switchAccount(newIndex);
+    return newAccount;
+  },
+
+  /**
+   * Switches the active account.
+   */
+  async switchAccount(index: number): Promise<void> {
+    const mnemonic = memoryMnemonic || (await storageService.getSecureMnemonic());
+    if (mnemonic) {
+      const mObj = ethers.Mnemonic.fromPhrase(mnemonic);
+      const hdNode = ethers.HDNodeWallet.fromMnemonic(mObj, `m/44'/60'/0'/0/${index}`);
+      memoryPrivateKey = hdNode.privateKey;
+      memoryAddress = hdNode.address;
+      await storageService.saveActiveAccountIndex(index);
+      await storageService.setWalletExists(true, hdNode.address);
+      logger.info(`Switched to Account ${index + 1}: ${hdNode.address}`);
+    }
   },
 
   /**
@@ -196,6 +293,7 @@ export const walletService = {
   lockWallet(): void {
     memoryPrivateKey = null;
     memoryAddress = null;
+    memoryMnemonic = null;
     logger.info('Wallet locked. Memory cleared.');
   },
 
@@ -238,6 +336,9 @@ export const walletService = {
     const isValid = await storageService.verifyPin(verifiedPin);
     if (!isValid) {
       throw new Error('Incorrect PIN. Access denied.');
+    }
+    if (memoryPrivateKey) {
+      return memoryPrivateKey;
     }
     const key = await storageService.getSecurePrivateKey();
     if (!key) {
